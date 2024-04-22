@@ -1,0 +1,15 @@
+[submodule "vendor/glm"]
+	path = vendor/glm
+	url = https://github.com/g-truc/glm
+[submodule "vendor/glfw"]
+	path = vendor/glfw
+	url = https://github.com/glfw/glfw
+[submodule "vendor/VulkanUtilityLibraries"]
+	path = vendor/VulkanUtilityLibraries
+	url = https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git
+[submodule "vendor/VMA"]
+	path = vendor/VMA
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "vendor/vk-bootstrap"]
+	path = vendor/vk-bootstrap
+	url = https://github.com/charles-lunarg/vk-bootstrap

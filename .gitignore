@@ -1,0 +1,6 @@
+.envrc
+.direnv/*
+
+.cache/**
+build/**
+bin/**
