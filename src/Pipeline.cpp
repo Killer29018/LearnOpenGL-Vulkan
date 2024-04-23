@@ -133,7 +133,7 @@ void PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompareOp compare
     s_DepthStencilCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     s_DepthStencilCI.pNext = nullptr;
     s_DepthStencilCI.flags = 0;
-    s_DepthStencilCI.depthTestEnable = VK_FALSE;
+    s_DepthStencilCI.depthTestEnable = VK_TRUE;
     s_DepthStencilCI.depthWriteEnable = depthWriteEnable;
     s_DepthStencilCI.depthCompareOp = compareOp;
     s_DepthStencilCI.depthBoundsTestEnable = VK_FALSE;

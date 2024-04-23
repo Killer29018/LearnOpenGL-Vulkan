@@ -4,6 +4,9 @@
 
 #include <VkBootstrap.h>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include "ErrorCheck.hpp"
 #include "Image.hpp"
 #include "Pipeline.hpp"
@@ -244,12 +247,13 @@ void Engine::initPipelines()
     PipelineBuilder::addPushConstant(pushConstant);
     PipelineBuilder::setShaders(vertShaderModule.value(), fragShaderModule.value());
     PipelineBuilder::inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+    PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
+                                VK_FRONT_FACE_CLOCKWISE);
     PipelineBuilder::setMultisampleNone();
     PipelineBuilder::disableBlending();
     PipelineBuilder::setColourAttachmentFormat(m_DrawImage.imageFormat);
     PipelineBuilder::setDepthFormat(m_DepthImage.imageFormat);
-    PipelineBuilder::enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL);
+    PipelineBuilder::enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS);
 
     m_BasicPipeline = PipelineBuilder::build(m_Device);
 
@@ -260,15 +264,47 @@ void Engine::initPipelines()
 void Engine::createMesh()
 {
     std::vector<Vertex> vertices = {
-        {.position = { -0.5f, -0.5f, 0.0f },
+        {.position = { -0.5f, -0.5f, 0.5f },
          .uv = { 0.0f, 0.0f },
-         .colour = { 1.0f, 0.0f, 0.0f }                                                          },
-        { .position = { 0.5f, -0.5f, 0.0f }, .uv = { 1.0f, 0.0f }, .colour = { 0.0f, 1.0f, 0.0f }},
-        { .position = { -0.5f, 0.5f, 0.0f }, .uv = { 0.0f, 1.0f }, .colour = { 0.0f, 0.0f, 1.0f }},
-        { .position = { 0.5f, 0.5f, 0.0f },  .uv = { 1.0f, 1.0f }, .colour = { 1.0f, 1.0f, 1.0f }}
+         .colour = { 1.0f, 0.0f, 0.0f, 1.0f }},
+
+        { .position = { 0.5f, -0.5f, 0.5f },
+         .uv = { 1.0f, 0.0f },
+         .colour = { 0.0f, 1.0f, 0.0f, 1.0f }},
+
+        { .position = { -0.5f, 0.5f, 0.5f },
+         .uv = { 0.0f, 1.0f },
+         .colour = { 0.0f, 0.0f, 1.0f, 1.0f }},
+
+        { .position = { 0.5f, 0.5f, 0.5f },
+         .uv = { 1.0f, 1.0f },
+         .colour = { 1.0f, 1.0f, 1.0f, 1.0f }},
+
+        { .position = { -0.5f, -0.5f, -0.5f },
+         .uv = { 0.0f, 0.0f },
+         .colour = { 1.0f, 0.0f, 0.0f, 1.0f }},
+
+        { .position = { 0.5f, -0.5f, -0.5f },
+         .uv = { 1.0f, 0.0f },
+         .colour = { 0.0f, 1.0f, 0.0f, 1.0f }},
+
+        { .position = { -0.5f, 0.5f, -0.5f },
+         .uv = { 0.0f, 1.0f },
+         .colour = { 0.0f, 0.0f, 1.0f, 1.0f }},
+
+        { .position = { 0.5f, 0.5f, -0.5f },
+         .uv = { 1.0f, 1.0f },
+         .colour = { 1.0f, 1.0f, 1.0f, 1.0f }},
     };
 
-    std::vector<uint32_t> indices = { 0, 1, 2, 1, 3, 2 };
+    std::vector<uint32_t> indices = {
+        0, 1, 2, 1, 3, 2, // Front
+        1, 5, 3, 5, 7, 3, // Right
+        4, 0, 2, 4, 2, 6, // Left
+        5, 4, 6, 5, 6, 7, // Back
+        4, 5, 0, 5, 1, 0, // Top
+        2, 3, 6, 3, 7, 6  // Bottom
+    };
     m_BasicMesh.createMesh<Vertex>(m_Device, m_Allocator, indices, vertices);
 }
 
@@ -299,7 +335,22 @@ void Engine::render()
     VK_CHECK(vkBeginCommandBuffer(cmd, &commandBufferBI));
 
     AllocatedImage::transition(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_GENERAL);
+
+    VkClearColorValue clearColour = {
+        {0.2f, 0.2f, 0.2f, 1.0f}
+    };
+    VkImageSubresourceRange range{};
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vkCmdClearColorImage(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearColour, 1, &range);
+
+    AllocatedImage::transition(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_GENERAL,
                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
     AllocatedImage::transition(cmd, m_DepthImage.image, VK_IMAGE_LAYOUT_UNDEFINED,
                                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
@@ -310,6 +361,9 @@ void Engine::render()
     colourAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     colourAI.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     colourAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colourAI.clearValue.color = {
+        {0.2f, 0.2f, 0.2f, 1.0f}
+    };
 
     VkRenderingAttachmentInfo depthAI{};
     depthAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -318,7 +372,7 @@ void Engine::render()
     depthAI.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAI.clearValue.depthStencil.depth = 0.0f;
+    depthAI.clearValue.depthStencil.depth = 1.0f;
 
     VkRenderingInfo renderInfo{};
     renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -354,10 +408,22 @@ void Engine::render()
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+    static float angle = 0.0f;
+
+    glm::mat4 model{ 1.0f };
+    model = glm::translate(model, glm::vec3(0.0f, 0.0f, -3.0f));
+    model = glm::rotate(model, angle, glm::normalize(glm::vec3(0.2f, -0.2f, 0.0f)));
+    model = glm::scale(model, glm::vec3(0.4f));
+    angle += 0.01f;
+
     VertexPushConstant pushConstantData;
-    pushConstantData.model = glm::mat4(1.0f);
+    pushConstantData.model = model;
     pushConstantData.view = glm::mat4(1.0f);
-    pushConstantData.proj = glm::mat4(1.0f);
+    pushConstantData.proj = glm::perspective(
+        glm::radians(70.0f), (float)m_Window->getSize().x / (float)m_Window->getSize().y, 0.01f,
+        1000.0f);
+    // pushConstantData.proj = glm::mat4(1.0f);
+
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
 
     vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -365,7 +431,7 @@ void Engine::render()
     vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                        sizeof(VertexPushConstant), &pushConstantData);
 
-    vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, 0);
 
     vkCmdEndRendering(cmd);
 

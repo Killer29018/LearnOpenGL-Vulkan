@@ -17,6 +17,8 @@ class Mesh
     AllocatedBuffer vertexBuffer;
     VkDeviceAddress vertexBufferAddress;
 
+    uint32_t indexCount;
+
   public:
     template<typename T>
     void createMesh(VkDevice device, VmaAllocator allocator, std::span<uint32_t> indices,
@@ -24,6 +26,8 @@ class Mesh
     {
         const size_t vertexBufferSize = vertices.size() * sizeof(T);
         const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+        indexCount = indices.size();
 
         vertexBuffer.createBuffer(allocator, vertexBufferSize,
                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |

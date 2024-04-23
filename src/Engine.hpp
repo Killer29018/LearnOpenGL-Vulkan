@@ -26,7 +26,7 @@ struct FrameData {
 struct Vertex {
     alignas(16) glm::vec3 position;
     alignas(16) glm::vec2 uv;
-    alignas(16) glm::vec3 colour;
+    alignas(16) glm::vec4 colour;
 };
 
 struct VertexPushConstant {
