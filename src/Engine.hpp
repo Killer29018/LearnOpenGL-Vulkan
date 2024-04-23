@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "EventHandler.hpp"
+#include "Image.hpp"
 #include "Window.hpp"
 
 struct FrameData {
@@ -61,6 +62,8 @@ class Engine : public EventObserver
     std::vector<VkImage> m_SwapchainImages;
     std::vector<VkImageView> m_SwapchainImageViews;
     VkExtent2D m_SwapchainImageExtent;
+
+    ImageAllocation m_DrawImage;
 
     size_t m_CurrentFrame = 0;
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> m_Frames;

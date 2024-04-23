@@ -2,9 +2,10 @@
 
 #include <iostream>
 
-#include "VkBootstrap.h"
+#include <VkBootstrap.h>
 
 #include "ErrorCheck.hpp"
+#include "Image.hpp"
 
 Engine::Engine()
 {
@@ -52,6 +53,7 @@ void Engine::cleanup()
         vkDestroyCommandPool(m_Device, m_Frames[i].commandPool, nullptr);
     }
 
+    m_DrawImage.destroy(m_Device, m_Allocator);
     destroySwapchain();
 
     vmaDestroyAllocator(m_Allocator);
@@ -68,7 +70,7 @@ void Engine::initVulkan()
 {
     vkb::InstanceBuilder builder;
     auto instRet = builder.set_app_name("LearnOpenGL-Vulkan")
-                       .request_validation_layers(false)
+                       .request_validation_layers(true)
                        .use_default_debug_messenger()
                        .require_api_version(1, 3, 0)
                        .build();
@@ -151,7 +153,16 @@ void Engine::createSwapchain()
     m_SwapchainImageViews = vkbSwapchain.get_image_views().value();
 }
 
-void Engine::initSwapchain() { createSwapchain(); }
+void Engine::initSwapchain()
+{
+    createSwapchain();
+
+    m_DrawImage.create(m_Device, m_Allocator,
+                       { (uint32_t)m_Window->getSize().x, (uint32_t)m_Window->getSize().y, 1 },
+                       VK_FORMAT_R16G16B16A16_UNORM,
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+}
 
 void Engine::initCommands()
 {
@@ -223,6 +234,19 @@ void Engine::render()
     commandBufferBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &commandBufferBI));
+
+    ImageAllocation::transition(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    ImageAllocation::transition(cmd, m_SwapchainImages[swapchainImageIndex],
+                                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkExtent2D drawExtent = { m_DrawImage.imageExtent.width, m_DrawImage.imageExtent.height };
+    ImageAllocation::copyImgToImg(cmd, m_DrawImage.image, m_SwapchainImages[swapchainImageIndex],
+                                  drawExtent, m_SwapchainImageExtent);
+
+    ImageAllocation::transition(cmd, m_SwapchainImages[swapchainImageIndex],
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
