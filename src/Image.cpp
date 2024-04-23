@@ -2,8 +2,8 @@
 
 #include "ErrorCheck.hpp"
 
-void ImageAllocation::create(VkDevice device, VmaAllocator allocator, VkExtent3D extent,
-                             VkFormat format, VkImageUsageFlags usage)
+void AllocatedImage::create(VkDevice device, VmaAllocator allocator, VkExtent3D extent,
+                            VkFormat format, VkImageUsageFlags usage)
 {
     imageFormat = format;
     imageExtent = extent;
@@ -43,14 +43,14 @@ void ImageAllocation::create(VkDevice device, VmaAllocator allocator, VkExtent3D
     VK_CHECK(vkCreateImageView(device, &imageViewCI, nullptr, &imageView));
 }
 
-void ImageAllocation::destroy(VkDevice device, VmaAllocator allocator)
+void AllocatedImage::destroy(VkDevice device, VmaAllocator allocator)
 {
     vkDestroyImageView(device, imageView, nullptr);
     vmaDestroyImage(allocator, image, allocation);
 }
 
-void ImageAllocation::transition(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout,
-                                 VkImageLayout newLayout)
+void AllocatedImage::transition(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout,
+                                VkImageLayout newLayout)
 {
     VkImageAspectFlags aspectMask = (newLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
                                         ? VK_IMAGE_ASPECT_DEPTH_BIT
@@ -80,8 +80,8 @@ void ImageAllocation::transition(VkCommandBuffer cmd, VkImage image, VkImageLayo
     vkCmdPipelineBarrier2(cmd, &dependencyInfo);
 }
 
-void ImageAllocation::copyImgToImg(VkCommandBuffer cmd, VkImage src, VkImage dst,
-                                   VkExtent2D srcSize, VkExtent2D dstSize)
+void AllocatedImage::copyImgToImg(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize,
+                                  VkExtent2D dstSize)
 {
     VkImageBlit2 blitRegion{};
     blitRegion.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2;

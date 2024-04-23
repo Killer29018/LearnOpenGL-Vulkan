@@ -4,7 +4,7 @@
 
 #include <vk_mem_alloc.h>
 
-class ImageAllocation
+class AllocatedImage
 {
   public:
     VkImage image;

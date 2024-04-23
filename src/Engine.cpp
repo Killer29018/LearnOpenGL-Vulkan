@@ -6,6 +6,7 @@
 
 #include "ErrorCheck.hpp"
 #include "Image.hpp"
+#include "Pipeline.hpp"
 
 Engine::Engine()
 {
@@ -18,6 +19,12 @@ Engine::Engine()
     initSwapchain();
     initCommands();
     initSyncStructures();
+
+    ImmediateSubmit::init(m_Device, m_GraphicsQueue, m_GraphicsQueueFamily);
+
+    initPipelines();
+
+    createMesh();
 
     mainLoop();
 }
@@ -44,6 +51,12 @@ void Engine::receiveEvent(const Event* event)
 
 void Engine::cleanup()
 {
+    m_BasicMesh.destroyMesh(m_Allocator);
+
+    ImmediateSubmit::free();
+
+    vkDestroyPipeline(m_Device, m_BasicPipeline.pipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_BasicPipeline.pipelineLayout, nullptr);
     for (size_t i = 0; i < m_Frames.size(); i++)
     {
         vkDestroySemaphore(m_Device, m_Frames[i].renderSemaphore, nullptr);
@@ -54,6 +67,7 @@ void Engine::cleanup()
     }
 
     m_DrawImage.destroy(m_Device, m_Allocator);
+    m_DepthImage.destroy(m_Device, m_Allocator);
     destroySwapchain();
 
     vmaDestroyAllocator(m_Allocator);
@@ -162,6 +176,10 @@ void Engine::initSwapchain()
                        VK_FORMAT_R16G16B16A16_UNORM,
                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+
+    m_DepthImage.create(m_Device, m_Allocator,
+                        { (uint32_t)m_Window->getSize().x, (uint32_t)m_Window->getSize().y, 1 },
+                        VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 }
 
 void Engine::initCommands()
@@ -209,6 +227,51 @@ void Engine::initSyncStructures()
     }
 }
 
+void Engine::initPipelines()
+{
+    VkPushConstantRange pushConstant{};
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstant.offset = 0;
+    pushConstant.size = sizeof(VertexPushConstant);
+
+    std::optional<VkShaderModule> vertShaderModule =
+        PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
+
+    std::optional<VkShaderModule> fragShaderModule =
+        PipelineBuilder::createShaderModule(m_Device, "res/shaders/basic.frag.spv");
+
+    PipelineBuilder::reset();
+    PipelineBuilder::addPushConstant(pushConstant);
+    PipelineBuilder::setShaders(vertShaderModule.value(), fragShaderModule.value());
+    PipelineBuilder::inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+    PipelineBuilder::setMultisampleNone();
+    PipelineBuilder::disableBlending();
+    PipelineBuilder::setColourAttachmentFormat(m_DrawImage.imageFormat);
+    PipelineBuilder::setDepthFormat(m_DepthImage.imageFormat);
+    PipelineBuilder::enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL);
+
+    m_BasicPipeline = PipelineBuilder::build(m_Device);
+
+    vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+    vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+}
+
+void Engine::createMesh()
+{
+    std::vector<Vertex> vertices = {
+        {.position = { -0.5f, -0.5f, 0.0f },
+         .uv = { 0.0f, 0.0f },
+         .colour = { 1.0f, 0.0f, 0.0f }                                                          },
+        { .position = { 0.5f, -0.5f, 0.0f }, .uv = { 1.0f, 0.0f }, .colour = { 0.0f, 1.0f, 0.0f }},
+        { .position = { -0.5f, 0.5f, 0.0f }, .uv = { 0.0f, 1.0f }, .colour = { 0.0f, 0.0f, 1.0f }},
+        { .position = { 0.5f, 0.5f, 0.0f },  .uv = { 1.0f, 1.0f }, .colour = { 1.0f, 1.0f, 1.0f }}
+    };
+
+    std::vector<uint32_t> indices = { 0, 1, 2, 1, 3, 2 };
+    m_BasicMesh.createMesh<Vertex>(m_Device, m_Allocator, indices, vertices);
+}
+
 FrameData& Engine::getCurrentFrame() { return m_Frames[m_CurrentFrame % MAX_FRAMES_IN_FLIGHT]; }
 
 void Engine::render()
@@ -235,18 +298,89 @@ void Engine::render()
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &commandBufferBI));
 
-    ImageAllocation::transition(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_UNDEFINED,
-                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    ImageAllocation::transition(cmd, m_SwapchainImages[swapchainImageIndex],
-                                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    AllocatedImage::transition(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    AllocatedImage::transition(cmd, m_DepthImage.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+    VkRenderingAttachmentInfo colourAI{};
+    colourAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    colourAI.pNext = nullptr;
+    colourAI.imageView = m_DrawImage.imageView;
+    colourAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    colourAI.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    colourAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+    VkRenderingAttachmentInfo depthAI{};
+    depthAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAI.pNext = nullptr;
+    depthAI.imageView = m_DepthImage.imageView;
+    depthAI.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAI.clearValue.depthStencil.depth = 0.0f;
+
+    VkRenderingInfo renderInfo{};
+    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderInfo.pNext = nullptr;
+    renderInfo.flags = 0;
+    renderInfo.renderArea =
+        VkRect2D({ 0, 0 }, { m_DrawImage.imageExtent.width, m_DrawImage.imageExtent.height });
+    renderInfo.layerCount = 1;
+    renderInfo.colorAttachmentCount = 1;
+    renderInfo.pColorAttachments = &colourAI;
+    renderInfo.pDepthAttachment = &depthAI;
+    renderInfo.pStencilAttachment = nullptr;
+
+    vkCmdBeginRendering(cmd, &renderInfo);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipeline);
+
+    VkViewport viewport{};
+    viewport.x = 0;
+    viewport.y = 0;
+    viewport.width = m_DrawImage.imageExtent.width;
+    viewport.height = m_DrawImage.imageExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset.x = 0.0f;
+    scissor.offset.y = 0.0f;
+    scissor.extent.width = m_DrawImage.imageExtent.width;
+    scissor.extent.height = m_DrawImage.imageExtent.height;
+
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    VertexPushConstant pushConstantData;
+    pushConstantData.model = glm::mat4(1.0f);
+    pushConstantData.view = glm::mat4(1.0f);
+    pushConstantData.proj = glm::mat4(1.0f);
+    pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
+
+    vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(VertexPushConstant), &pushConstantData);
+
+    vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+
+    vkCmdEndRendering(cmd);
+
+    AllocatedImage::transition(cmd, m_DrawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    AllocatedImage::transition(cmd, m_SwapchainImages[swapchainImageIndex],
+                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     VkExtent2D drawExtent = { m_DrawImage.imageExtent.width, m_DrawImage.imageExtent.height };
-    ImageAllocation::copyImgToImg(cmd, m_DrawImage.image, m_SwapchainImages[swapchainImageIndex],
-                                  drawExtent, m_SwapchainImageExtent);
+    AllocatedImage::copyImgToImg(cmd, m_DrawImage.image, m_SwapchainImages[swapchainImageIndex],
+                                 drawExtent, m_SwapchainImageExtent);
 
-    ImageAllocation::transition(cmd, m_SwapchainImages[swapchainImageIndex],
-                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    AllocatedImage::transition(cmd, m_SwapchainImages[swapchainImageIndex],
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 

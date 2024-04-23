@@ -59,8 +59,8 @@ target_link_libraries(
 set(InputRes "${PROJECT_SOURCE_DIR}/res")
 set(OutputRes "${outputDirectory}/res")
 
-# add_custom_target(Resources ALL COMMENT "Copying Resources")
-add_custom_target(Resources COMMENT "Copying Resources")
+add_custom_target(Resources ALL COMMENT "Copying Resources")
+# add_custom_target(Resources COMMENT "Copying Resources")
 
 add_custom_command(
   TARGET Resources
@@ -108,12 +108,12 @@ add_custom_command(
   COMMAND cmake -E copy ${RESOURCES_COMPILED_SHADERS} "${OutputRes}/shaders"
   COMMENT "Copied Shaders from ${InputRes}/shaders/ To ${OutputRes}/shaders/")
 
-add_custom_command(
-  TARGET Resources
-  POST_BUILD
-  COMMAND cmake -E copy_directory_if_different "${InputRes}/assets"
-          "${OutputRes}/assets"
-  COMMENT "Copied Assets from ${InputRes}/assets/ To ${OutputRes}/assets/")
+# add_custom_command(
+#   TARGET Resources
+#   POST_BUILD
+#   COMMAND cmake -E copy_directory_if_different "${InputRes}/assets"
+#           "${OutputRes}/assets"
+#   COMMENT "Copied Assets from ${InputRes}/assets/ To ${OutputRes}/assets/")
 
 # add_custom_command( TARGET Resources POST_BUILD COMMAND cmake -E
 # copy_directory_if_different "${InputRes}/textures" "${OutputRes}/textures"
