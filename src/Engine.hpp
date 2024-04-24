@@ -24,13 +24,16 @@ struct FrameData {
     VkSemaphore renderSemaphore;
 };
 
+struct ObjectData {
+    glm::mat4 model;
+};
+
 struct Vertex {
     alignas(16) glm::vec3 position;
     alignas(16) glm::vec2 uv;
 };
 
 struct VertexPushConstant {
-    alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
     alignas(16) VkDeviceAddress vertexBuffer;
@@ -59,6 +62,8 @@ class Engine : public EventObserver
     void initDescriptorSetLayouts();
 
     void initTextures();
+
+    void createObjects();
 
     void initPipelines();
 
@@ -103,6 +108,9 @@ class Engine : public EventObserver
     VkDescriptorPool m_DescriptorPool;
     std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> m_MainDescriptors;
     VkDescriptorSetLayout m_MainDescriptorLayout;
+
+    size_t m_ObjectCount;
+    std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_ObjectDataBuffer;
 
     Pipeline m_BasicPipeline;
 

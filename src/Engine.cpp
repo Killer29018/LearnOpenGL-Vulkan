@@ -31,6 +31,8 @@ Engine::Engine()
 
     initTextures();
 
+    createObjects();
+
     initDescriptorPool();
     initDescriptorSets();
 
@@ -67,6 +69,11 @@ void Engine::cleanup()
 
     vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(m_Device, m_MainDescriptorLayout, nullptr);
+
+    for (size_t i = 0; i < m_ObjectDataBuffer.size(); i++)
+    {
+        m_ObjectDataBuffer[i].destroyBuffer(m_Allocator);
+    }
 
     m_FaceTexture.destroy(m_Device, m_Allocator);
     m_BoxTexture.destroy(m_Device, m_Allocator);
@@ -119,6 +126,9 @@ void Engine::initVulkan()
     features12.bufferDeviceAddress = true;
     features12.descriptorIndexing = true;
 
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.shaderDrawParameters = true;
+
     VkPhysicalDeviceFeatures features{};
     features.robustBufferAccess = true;
 
@@ -126,6 +136,7 @@ void Engine::initVulkan()
     vkb::PhysicalDevice vkbPhysicalDevice = selector.set_minimum_version(1, 3)
                                                 .set_required_features_13(features13)
                                                 .set_required_features_12(features12)
+                                                .set_required_features_11(features11)
                                                 .set_required_features(features)
                                                 .set_surface(m_Surface)
                                                 .select()
@@ -259,7 +270,14 @@ void Engine::initDescriptorSetLayouts()
     faceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     faceBinding.pImmutableSamplers = nullptr;
 
-    std::vector<VkDescriptorSetLayoutBinding> bindings{ boxBinding, faceBinding };
+    VkDescriptorSetLayoutBinding bufferBinding{};
+    bufferBinding.binding = 2;
+    bufferBinding.descriptorCount = 1;
+    bufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    bufferBinding.pImmutableSamplers = nullptr;
+
+    std::vector<VkDescriptorSetLayoutBinding> bindings{ boxBinding, faceBinding, bufferBinding };
 
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{};
     descriptorSetLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -313,11 +331,67 @@ void Engine::initTextures()
     m_FaceTexture.createSampler(m_Device, VK_FILTER_LINEAR);
 }
 
+void Engine::createObjects()
+{
+    std::vector<glm::vec3> cubePositions = {
+        glm::vec3(0.0f, -0.0f, 0.0f),  glm::vec3(2.0f, -5.0f, -15.0f),
+        glm::vec3(-1.5f, 2.2f, -2.5f), glm::vec3(-3.8f, 2.0f, -12.3f),
+        glm::vec3(2.4f, 0.4f, -3.5f),  glm::vec3(-1.7f, -3.0f, -7.5f),
+        glm::vec3(1.3f, 2.0f, -2.5f),  glm::vec3(1.5f, -2.0f, -2.5f),
+        glm::vec3(1.5f, -0.2f, -1.5f), glm::vec3(-1.3f, -1.0f, -1.5f)
+    };
+
+    m_ObjectCount = cubePositions.size();
+
+    size_t size = m_ObjectCount * sizeof(ObjectData);
+
+    std::vector<ObjectData> models(m_ObjectCount);
+    for (size_t i = 0; i < models.size(); i++)
+    {
+        glm::mat4 model{ 1.0f };
+        model = glm::translate(model, cubePositions[i]);
+        float angle = 20.0f * i;
+        model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, -0.3f, 0.5f));
+
+        models.at(i) = { .model = model };
+    }
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        m_ObjectDataBuffer[i].createBuffer(m_Allocator, size,
+                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           VMA_MEMORY_USAGE_GPU_ONLY);
+    }
+
+    AllocatedBuffer stagingBuffer;
+    stagingBuffer.createBuffer(m_Allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                               VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    memcpy(stagingBuffer.allocationInfo.pMappedData, models.data(), size);
+
+    ImmediateSubmit::submit([&](VkCommandBuffer cmd) {
+        VkBufferCopy copy{};
+        copy.srcOffset = 0;
+        copy.dstOffset = 0;
+        copy.size = size;
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_ObjectDataBuffer[i].buffer, 1, &copy);
+        }
+    });
+
+    stagingBuffer.destroyBuffer(m_Allocator);
+}
+
 void Engine::initDescriptorPool()
 {
     std::vector<VkDescriptorPoolSize> poolSizes = {
         {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2}
+         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2},
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)    }
     };
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{};
@@ -354,6 +428,11 @@ void Engine::initDescriptorSets()
         descriptorII_Face.imageView = m_FaceTexture.imageView;
         descriptorII_Face.sampler = m_FaceTexture.imageSampler.value();
 
+        VkDescriptorBufferInfo descriptorBI{};
+        descriptorBI.buffer = m_ObjectDataBuffer[i].buffer;
+        descriptorBI.offset = 0;
+        descriptorBI.range = m_ObjectCount * sizeof(ObjectData);
+
         std::vector<VkWriteDescriptorSet> descriptorWrite{};
         descriptorWrite.push_back(
             VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -374,6 +453,16 @@ void Engine::initDescriptorSets()
                                   .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                   .pImageInfo = &descriptorII_Face,
                                   .pBufferInfo = nullptr,
+                                  .pTexelBufferView = nullptr });
+        descriptorWrite.push_back(
+            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                  .dstSet = m_MainDescriptors[i],
+                                  .dstBinding = 2,
+                                  .dstArrayElement = 0,
+                                  .descriptorCount = 1,
+                                  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                  .pImageInfo = nullptr,
+                                  .pBufferInfo = &descriptorBI,
                                   .pTexelBufferView = nullptr });
 
         vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrite.size()),
@@ -458,14 +547,6 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    static glm::vec3 cubePositions[] = {
-        glm::vec3(0.0f, -0.0f, 0.0f),  glm::vec3(2.0f, -5.0f, -15.0f),
-        glm::vec3(-1.5f, 2.2f, -2.5f), glm::vec3(-3.8f, 2.0f, -12.3f),
-        glm::vec3(2.4f, 0.4f, -3.5f),  glm::vec3(-1.7f, -3.0f, -7.5f),
-        glm::vec3(1.3f, 2.0f, -2.5f),  glm::vec3(1.5f, -2.0f, -2.5f),
-        glm::vec3(1.5f, -0.2f, -1.5f), glm::vec3(-1.3f, -1.0f, -1.5f)
-    };
-
     vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
     VertexPushConstant pushConstantData;
@@ -475,21 +556,10 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
         1000.0f);
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
 
-    for (size_t i = 0; i < 10; i++)
-    {
-        glm::mat4 model{ 1.0f };
-        model = glm::translate(model, cubePositions[i]);
-        float angle = 20.0f * i;
-        model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, -0.3f, 0.5f));
-        // model = glm::scale(model, glm::vec3(0.4f));
+    vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(VertexPushConstant), &pushConstantData);
 
-        pushConstantData.model = model;
-
-        vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(VertexPushConstant), &pushConstantData);
-
-        vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, 0);
-    }
+    vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_ObjectCount, 0, 0, 0);
 }
 
 void Engine::render()
