@@ -25,7 +25,14 @@ Engine::Engine()
 
     ImmediateSubmit::init(m_Device, m_GraphicsQueue, m_GraphicsQueueFamily);
 
+    initDescriptorSetLayouts();
+
     initPipelines();
+
+    initTextures();
+
+    initDescriptorPool();
+    initDescriptorSets();
 
     createMesh();
 
@@ -57,6 +64,12 @@ void Engine::cleanup()
     m_BasicMesh.destroyMesh(m_Allocator);
 
     ImmediateSubmit::free();
+
+    vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_MainDescriptorLayout, nullptr);
+
+    m_FaceTexture.destroy(m_Device, m_Allocator);
+    m_BoxTexture.destroy(m_Device, m_Allocator);
 
     vkDestroyPipeline(m_Device, m_BasicPipeline.pipeline, nullptr);
     vkDestroyPipelineLayout(m_Device, m_BasicPipeline.pipelineLayout, nullptr);
@@ -230,6 +243,33 @@ void Engine::initSyncStructures()
     }
 }
 
+void Engine::initDescriptorSetLayouts()
+{
+    VkDescriptorSetLayoutBinding boxBinding{};
+    boxBinding.binding = 0;
+    boxBinding.descriptorCount = 1;
+    boxBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    boxBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    boxBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding faceBinding{};
+    faceBinding.binding = 1;
+    faceBinding.descriptorCount = 1;
+    faceBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    faceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    faceBinding.pImmutableSamplers = nullptr;
+
+    std::vector<VkDescriptorSetLayoutBinding> bindings{ boxBinding, faceBinding };
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{};
+    descriptorSetLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutCI.bindingCount = static_cast<uint32_t>(bindings.size());
+    descriptorSetLayoutCI.pBindings = bindings.data();
+
+    VK_CHECK(vkCreateDescriptorSetLayout(m_Device, &descriptorSetLayoutCI, nullptr,
+                                         &m_MainDescriptorLayout));
+}
+
 void Engine::initPipelines()
 {
     VkPushConstantRange pushConstant{};
@@ -241,10 +281,11 @@ void Engine::initPipelines()
         PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
 
     std::optional<VkShaderModule> fragShaderModule =
-        PipelineBuilder::createShaderModule(m_Device, "res/shaders/basic.frag.spv");
+        PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.frag.spv");
 
     PipelineBuilder::reset();
     PipelineBuilder::addPushConstant(pushConstant);
+    PipelineBuilder::addDescriptorLayout(m_MainDescriptorLayout);
     PipelineBuilder::setShaders(vertShaderModule.value(), fragShaderModule.value());
     PipelineBuilder::inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
@@ -261,54 +302,195 @@ void Engine::initPipelines()
     vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
 }
 
+void Engine::initTextures()
+{
+    m_BoxTexture.load(m_Device, m_Allocator, "res/textures/container.jpg",
+                      VK_IMAGE_USAGE_SAMPLED_BIT);
+    m_BoxTexture.createSampler(m_Device, VK_FILTER_LINEAR);
+
+    m_FaceTexture.load(m_Device, m_Allocator, "res/textures/awesomeface.png",
+                       VK_IMAGE_USAGE_SAMPLED_BIT);
+    m_FaceTexture.createSampler(m_Device, VK_FILTER_LINEAR);
+}
+
+void Engine::initDescriptorPool()
+{
+    std::vector<VkDescriptorPoolSize> poolSizes = {
+        {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2}
+    };
+
+    VkDescriptorPoolCreateInfo descriptorPoolCI{};
+    descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    descriptorPoolCI.pPoolSizes = poolSizes.data();
+    descriptorPoolCI.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+    VK_CHECK(vkCreateDescriptorPool(m_Device, &descriptorPoolCI, nullptr, &m_DescriptorPool));
+}
+
+void Engine::initDescriptorSets()
+{
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts(MAX_FRAMES_IN_FLIGHT,
+                                                            m_MainDescriptorLayout);
+
+    VkDescriptorSetAllocateInfo descriptorSetAI{};
+    descriptorSetAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAI.descriptorPool = m_DescriptorPool;
+    descriptorSetAI.descriptorSetCount = static_cast<uint32_t>(descriptorSetLayouts.size());
+    descriptorSetAI.pSetLayouts = descriptorSetLayouts.data();
+
+    VK_CHECK(vkAllocateDescriptorSets(m_Device, &descriptorSetAI, m_MainDescriptors.data()));
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        VkDescriptorImageInfo descriptorII_Box{};
+        descriptorII_Box.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        descriptorII_Box.imageView = m_BoxTexture.imageView;
+        descriptorII_Box.sampler = m_BoxTexture.imageSampler.value();
+
+        VkDescriptorImageInfo descriptorII_Face{};
+        descriptorII_Face.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        descriptorII_Face.imageView = m_FaceTexture.imageView;
+        descriptorII_Face.sampler = m_FaceTexture.imageSampler.value();
+
+        std::vector<VkWriteDescriptorSet> descriptorWrite{};
+        descriptorWrite.push_back(
+            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                  .dstSet = m_MainDescriptors[i],
+                                  .dstBinding = 0,
+                                  .dstArrayElement = 0,
+                                  .descriptorCount = 1,
+                                  .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  .pImageInfo = &descriptorII_Box,
+                                  .pBufferInfo = nullptr,
+                                  .pTexelBufferView = nullptr });
+        descriptorWrite.push_back(
+            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                  .dstSet = m_MainDescriptors[i],
+                                  .dstBinding = 1,
+                                  .dstArrayElement = 0,
+                                  .descriptorCount = 1,
+                                  .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  .pImageInfo = &descriptorII_Face,
+                                  .pBufferInfo = nullptr,
+                                  .pTexelBufferView = nullptr });
+
+        vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrite.size()),
+                               descriptorWrite.data(), 0, nullptr);
+    }
+}
+
 void Engine::createMesh()
 {
     std::vector<Vertex> vertices = {
-        {.position = { -0.5f, -0.5f, 0.5f },
-         .uv = { 0.0f, 0.0f },
-         .colour = { 1.0f, 0.0f, 0.0f, 1.0f }},
+  // Front: 0-3
+        {.position = { -0.5f, -0.5f, 0.5f },   .uv = { 0.0f, 0.0f }},
+        { .position = { 0.5f, -0.5f, 0.5f },   .uv = { 1.0f, 0.0f }},
+        { .position = { -0.5f, 0.5f, 0.5f },   .uv = { 0.0f, 1.0f }},
+        { .position = { 0.5f, 0.5f, 0.5f },    .uv = { 1.0f, 1.0f }},
 
-        { .position = { 0.5f, -0.5f, 0.5f },
-         .uv = { 1.0f, 0.0f },
-         .colour = { 0.0f, 1.0f, 0.0f, 1.0f }},
+ // Back: 4-7
+        { .position = { 0.5f, -0.5f, -0.5f },  .uv = { 0.0f, 0.0f }},
+        { .position = { -0.5f, -0.5f, -0.5f }, .uv = { 1.0f, 0.0f }},
+        { .position = { 0.5f, 0.5f, -0.5f },   .uv = { 0.0f, 1.0f }},
+        { .position = { -0.5f, 0.5f, -0.5f },  .uv = { 1.0f, 1.0f }},
 
-        { .position = { -0.5f, 0.5f, 0.5f },
-         .uv = { 0.0f, 1.0f },
-         .colour = { 0.0f, 0.0f, 1.0f, 1.0f }},
+ // Right: 8-11
+        { .position = { 0.5f, -0.5f, 0.5f },   .uv = { 0.0f, 0.0f }},
+        { .position = { 0.5f, -0.5f, -0.5f },  .uv = { 1.0f, 0.0f }},
+        { .position = { 0.5f, 0.5f, 0.5f },    .uv = { 0.0f, 1.0f }},
+        { .position = { 0.5f, 0.5f, -0.5f },   .uv = { 1.0f, 1.0f }},
 
-        { .position = { 0.5f, 0.5f, 0.5f },
-         .uv = { 1.0f, 1.0f },
-         .colour = { 1.0f, 1.0f, 1.0f, 1.0f }},
+ // Left: 12-15
+        { .position = { -0.5f, -0.5f, -0.5f }, .uv = { 0.0f, 0.0f }},
+        { .position = { -0.5f, -0.5f, 0.5f },  .uv = { 1.0f, 0.0f }},
+        { .position = { -0.5f, 0.5f, -0.5f },  .uv = { 0.0f, 1.0f }},
+        { .position = { -0.5f, 0.5f, 0.5f },   .uv = { 1.0f, 1.0f }},
 
-        { .position = { -0.5f, -0.5f, -0.5f },
-         .uv = { 0.0f, 0.0f },
-         .colour = { 1.0f, 0.0f, 0.0f, 1.0f }},
+ // Top: 16-19
+        { .position = { -0.5f, -0.5f, -0.5f }, .uv = { 0.0f, 0.0f }},
+        { .position = { 0.5f, -0.5f, -0.5f },  .uv = { 1.0f, 0.0f }},
+        { .position = { -0.5f, -0.5f, 0.5f },  .uv = { 0.0f, 1.0f }},
+        { .position = { 0.5f, -0.5f, 0.5f },   .uv = { 1.0f, 1.0f }},
 
-        { .position = { 0.5f, -0.5f, -0.5f },
-         .uv = { 1.0f, 0.0f },
-         .colour = { 0.0f, 1.0f, 0.0f, 1.0f }},
-
-        { .position = { -0.5f, 0.5f, -0.5f },
-         .uv = { 0.0f, 1.0f },
-         .colour = { 0.0f, 0.0f, 1.0f, 1.0f }},
-
-        { .position = { 0.5f, 0.5f, -0.5f },
-         .uv = { 1.0f, 1.0f },
-         .colour = { 1.0f, 1.0f, 1.0f, 1.0f }},
+ // Bottom: 20-23
+        { .position = { -0.5f, 0.5f, 0.5f },   .uv = { 0.0f, 0.0f }},
+        { .position = { 0.5f, 0.5f, 0.5f },    .uv = { 1.0f, 0.0f }},
+        { .position = { -0.5f, 0.5f, -0.5f },  .uv = { 0.0f, 1.0f }},
+        { .position = { 0.5f, 0.5f, -0.5f },   .uv = { 1.0f, 1.0f }},
     };
 
     std::vector<uint32_t> indices = {
-        0, 1, 2, 1, 3, 2, // Front
-        1, 5, 3, 5, 7, 3, // Right
-        4, 0, 2, 4, 2, 6, // Left
-        5, 4, 6, 5, 6, 7, // Back
-        4, 5, 0, 5, 1, 0, // Top
-        2, 3, 6, 3, 7, 6  // Bottom
+        0,  1,  2,  1,  3,  2,  // Front
+        4,  5,  6,  5,  7,  6,  // Back
+        8,  9,  10, 9,  11, 10, // Right
+        12, 13, 14, 13, 15, 14, // Left
+        16, 17, 18, 17, 19, 18, // Top
+        20, 21, 22, 21, 23, 22  // Bottom
     };
     m_BasicMesh.createMesh<Vertex>(m_Device, m_Allocator, indices, vertices);
 }
 
 FrameData& Engine::getCurrentFrame() { return m_Frames[m_CurrentFrame % MAX_FRAMES_IN_FLIGHT]; }
+
+void Engine::renderGeometry(VkCommandBuffer& cmd)
+{
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipelineLayout, 0,
+                            1, &m_MainDescriptors[m_CurrentFrame % 2], 0, nullptr);
+
+    VkViewport viewport{};
+    viewport.x = 0;
+    viewport.y = 0;
+    viewport.width = m_DrawImage.imageExtent.width;
+    viewport.height = m_DrawImage.imageExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset.x = 0.0f;
+    scissor.offset.y = 0.0f;
+    scissor.extent.width = m_DrawImage.imageExtent.width;
+    scissor.extent.height = m_DrawImage.imageExtent.height;
+
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    static glm::vec3 cubePositions[] = {
+        glm::vec3(0.0f, -0.0f, 0.0f),  glm::vec3(2.0f, -5.0f, -15.0f),
+        glm::vec3(-1.5f, 2.2f, -2.5f), glm::vec3(-3.8f, 2.0f, -12.3f),
+        glm::vec3(2.4f, 0.4f, -3.5f),  glm::vec3(-1.7f, -3.0f, -7.5f),
+        glm::vec3(1.3f, 2.0f, -2.5f),  glm::vec3(1.5f, -2.0f, -2.5f),
+        glm::vec3(1.5f, -0.2f, -1.5f), glm::vec3(-1.3f, -1.0f, -1.5f)
+    };
+
+    vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    VertexPushConstant pushConstantData;
+    pushConstantData.view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
+    pushConstantData.proj = glm::perspective(
+        glm::radians(70.0f), (float)m_Window->getSize().x / (float)m_Window->getSize().y, 0.01f,
+        1000.0f);
+    pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
+
+    for (size_t i = 0; i < 10; i++)
+    {
+        glm::mat4 model{ 1.0f };
+        model = glm::translate(model, cubePositions[i]);
+        float angle = 20.0f * i;
+        model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, -0.3f, 0.5f));
+        // model = glm::scale(model, glm::vec3(0.4f));
+
+        pushConstantData.model = model;
+
+        vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(VertexPushConstant), &pushConstantData);
+
+        vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, 0);
+    }
+}
 
 void Engine::render()
 {
@@ -388,50 +570,7 @@ void Engine::render()
 
     vkCmdBeginRendering(cmd, &renderInfo);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipeline);
-
-    VkViewport viewport{};
-    viewport.x = 0;
-    viewport.y = 0;
-    viewport.width = m_DrawImage.imageExtent.width;
-    viewport.height = m_DrawImage.imageExtent.height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset.x = 0.0f;
-    scissor.offset.y = 0.0f;
-    scissor.extent.width = m_DrawImage.imageExtent.width;
-    scissor.extent.height = m_DrawImage.imageExtent.height;
-
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    static float angle = 0.0f;
-
-    glm::mat4 model{ 1.0f };
-    model = glm::translate(model, glm::vec3(0.0f, 0.0f, -3.0f));
-    model = glm::rotate(model, angle, glm::normalize(glm::vec3(0.2f, -0.2f, 0.0f)));
-    model = glm::scale(model, glm::vec3(0.4f));
-    angle += 0.01f;
-
-    VertexPushConstant pushConstantData;
-    pushConstantData.model = model;
-    pushConstantData.view = glm::mat4(1.0f);
-    pushConstantData.proj = glm::perspective(
-        glm::radians(70.0f), (float)m_Window->getSize().x / (float)m_Window->getSize().y, 0.01f,
-        1000.0f);
-    // pushConstantData.proj = glm::mat4(1.0f);
-
-    pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
-
-    vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                       sizeof(VertexPushConstant), &pushConstantData);
-
-    vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, 0);
+    renderGeometry(cmd);
 
     vkCmdEndRendering(cmd);
 

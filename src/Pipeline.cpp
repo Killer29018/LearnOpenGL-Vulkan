@@ -9,6 +9,7 @@
 #include <vector>
 
 std::vector<VkPushConstantRange> PipelineBuilder::s_PushConstants;
+std::vector<VkDescriptorSetLayout> PipelineBuilder::s_DescriptorLayouts;
 std::vector<VkPipelineShaderStageCreateInfo> PipelineBuilder::s_ShaderStages;
 
 VkFormat PipelineBuilder::s_ColourAttachmentFormat;
@@ -22,6 +23,7 @@ VkPipelineRenderingCreateInfo PipelineBuilder::s_RenderCI;
 void PipelineBuilder::reset()
 {
     s_PushConstants.clear();
+    s_DescriptorLayouts.clear();
     s_ShaderStages.clear();
 
     s_ColourAttachmentFormat = {};
@@ -36,6 +38,11 @@ void PipelineBuilder::reset()
 void PipelineBuilder::addPushConstant(VkPushConstantRange pushConstant)
 {
     s_PushConstants.push_back(pushConstant);
+}
+
+void PipelineBuilder::addDescriptorLayout(VkDescriptorSetLayout descriptorLayout)
+{
+    s_DescriptorLayouts.push_back(descriptorLayout);
 }
 
 void PipelineBuilder::setShaders(VkShaderModule vertShaderModule, VkShaderModule fragShaderModule)
@@ -187,6 +194,8 @@ Pipeline PipelineBuilder::build(VkDevice device)
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI{};
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCI.setLayoutCount = static_cast<uint32_t>(s_DescriptorLayouts.size());
+    pipelineLayoutCI.pSetLayouts = s_DescriptorLayouts.data();
     pipelineLayoutCI.pushConstantRangeCount = static_cast<uint32_t>(s_PushConstants.size());
     pipelineLayoutCI.pPushConstantRanges = s_PushConstants.data();
 

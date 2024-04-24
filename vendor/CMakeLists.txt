@@ -33,9 +33,10 @@ add_subdirectory(VulkanUtilityLibraries)
 
 # add_subdirectory(tinyobjloader)
 #
-# project(STB) add_library(STB STATIC "stb/stb_image.h")
-# target_include_directories(STB PUBLIC "stb") set_target_properties(STB
-# PROPERTIES LINKER_LANGUAGE CXX)
+project(STB)
+add_library(STB STATIC "stb/stb_image.h")
+target_include_directories(STB PUBLIC "stb")
+set_target_properties(STB PROPERTIES LINKER_LANGUAGE CXX)
 #
 # project(Imgui) file( GLOB IMGUI_FILES CONFIGURE_DEPENDS "imgui/*.h"
 # "imgui/*.cpp" "imgui/backends/imgui_impl_glfw.*"

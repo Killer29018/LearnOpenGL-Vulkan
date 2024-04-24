@@ -17,6 +17,7 @@ class PipelineBuilder
     static void reset();
 
     static void addPushConstant(VkPushConstantRange pushConstant);
+    static void addDescriptorLayout(VkDescriptorSetLayout descriptorLayout);
 
     static void setShaders(VkShaderModule vertShaderModule, VkShaderModule fragShaderModule);
     static void inputAssembly(VkPrimitiveTopology topology);
@@ -38,6 +39,7 @@ class PipelineBuilder
 
   private:
     static std::vector<VkPushConstantRange> s_PushConstants;
+    static std::vector<VkDescriptorSetLayout> s_DescriptorLayouts;
     static std::vector<VkPipelineShaderStageCreateInfo> s_ShaderStages;
 
     static VkFormat s_ColourAttachmentFormat;

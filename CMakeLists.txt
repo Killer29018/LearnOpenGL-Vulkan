@@ -47,12 +47,7 @@ target_include_directories(
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE ${linker}
-  PUBLIC glfw
-         Vulkan::Vulkan
-         glm::glm
-         # STB
-         vk-bootstrap
-         VulkanMemoryAllocator
+  PUBLIC glfw Vulkan::Vulkan glm::glm STB vk-bootstrap VulkanMemoryAllocator
          # Imgui
 )
 
@@ -108,17 +103,17 @@ add_custom_command(
   COMMAND cmake -E copy ${RESOURCES_COMPILED_SHADERS} "${OutputRes}/shaders"
   COMMENT "Copied Shaders from ${InputRes}/shaders/ To ${OutputRes}/shaders/")
 
-# add_custom_command(
-#   TARGET Resources
-#   POST_BUILD
-#   COMMAND cmake -E copy_directory_if_different "${InputRes}/assets"
-#           "${OutputRes}/assets"
-#   COMMENT "Copied Assets from ${InputRes}/assets/ To ${OutputRes}/assets/")
-
 # add_custom_command( TARGET Resources POST_BUILD COMMAND cmake -E
-# copy_directory_if_different "${InputRes}/textures" "${OutputRes}/textures"
-# COMMENT "Copied Textures from ${InputRes}/textures/ To ${OutputRes}/textures/
-# ")
+# copy_directory_if_different "${InputRes}/assets" "${OutputRes}/assets" COMMENT
+# "Copied Assets from ${InputRes}/assets/ To ${OutputRes}/assets/")
+
+add_custom_command(
+  TARGET Resources
+  POST_BUILD
+  COMMAND cmake -E copy_directory_if_different "${InputRes}/textures"
+          "${OutputRes}/textures"
+  COMMENT "Copied Textures from ${InputRes}/textures/ To ${OutputRes}/textures/"
+)
 #
 # add_custom_command( TARGET Resources POST_BUILD COMMAND cmake -E
 # copy_directory_if_different "${InputRes}/models" "${OutputRes}/models" COMMENT

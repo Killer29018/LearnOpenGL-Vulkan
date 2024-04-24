@@ -1,6 +1,14 @@
 #include "Image.hpp"
 
+#include "Buffer.hpp"
 #include "ErrorCheck.hpp"
+#include "ImmediateSubmit.hpp"
+
+#include <stb_image.h>
+
+#include <cstring>
+#include <format>
+#include <iostream>
 
 void AllocatedImage::create(VkDevice device, VmaAllocator allocator, VkExtent3D extent,
                             VkFormat format, VkImageUsageFlags usage)
@@ -43,8 +51,80 @@ void AllocatedImage::create(VkDevice device, VmaAllocator allocator, VkExtent3D 
     VK_CHECK(vkCreateImageView(device, &imageViewCI, nullptr, &imageView));
 }
 
+void AllocatedImage::load(VkDevice device, VmaAllocator allocator, std::filesystem::path file,
+                          VkImageUsageFlags usage)
+{
+    int width, height, channels;
+    uint8_t* data = stbi_load(file.c_str(), &width, &height, &channels, 4);
+
+    if (data)
+    {
+        imageExtent = VkExtent3D{ (uint32_t)width, (uint32_t)height, 1 };
+
+        size_t size = imageExtent.width * imageExtent.height * imageExtent.depth * 4;
+
+        AllocatedBuffer uploadBuffer;
+        uploadBuffer.createBuffer(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                  VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+        memcpy(uploadBuffer.allocationInfo.pMappedData, data, size);
+
+        create(device, allocator, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+               usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+
+        ImmediateSubmit::submit([&](VkCommandBuffer cmd) {
+            AllocatedImage::transition(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            VkBufferImageCopy copyRegion{};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = 0;
+            copyRegion.bufferImageHeight = 0;
+            copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.imageSubresource.mipLevel = 0;
+            copyRegion.imageSubresource.baseArrayLayer = 0;
+            copyRegion.imageSubresource.layerCount = 1;
+            copyRegion.imageExtent = imageExtent;
+
+            vkCmdCopyBufferToImage(cmd, uploadBuffer.buffer, image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+            AllocatedImage::transition(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        });
+
+        uploadBuffer.destroyBuffer(allocator);
+
+        stbi_image_free(data);
+    }
+    else
+    {
+        std::cerr << std::format("Failed to load Image: {}\n", file.c_str());
+    }
+}
+
+void AllocatedImage::createSampler(VkDevice device, VkFilter filter)
+{
+    VkSamplerCreateInfo samplerCI{};
+    samplerCI.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerCI.pNext = nullptr;
+    samplerCI.flags = 0;
+    samplerCI.minFilter = filter;
+    samplerCI.magFilter = filter;
+    samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerCI.maxLod = VK_LOD_CLAMP_NONE;
+    samplerCI.minLod = 0;
+
+    VkSampler sampler;
+    VK_CHECK(vkCreateSampler(device, &samplerCI, nullptr, &sampler));
+
+    imageSampler = sampler;
+}
+
 void AllocatedImage::destroy(VkDevice device, VmaAllocator allocator)
 {
+    if (imageSampler.has_value()) vkDestroySampler(device, imageSampler.value(), nullptr);
+
     vkDestroyImageView(device, imageView, nullptr);
     vmaDestroyImage(allocator, image, allocation);
 }

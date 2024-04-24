@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "Buffer.hpp"
+#include "Descriptors.hpp"
 #include "EventHandler.hpp"
 #include "Image.hpp"
 #include "ImmediateSubmit.hpp"
@@ -26,7 +27,6 @@ struct FrameData {
 struct Vertex {
     alignas(16) glm::vec3 position;
     alignas(16) glm::vec2 uv;
-    alignas(16) glm::vec4 colour;
 };
 
 struct VertexPushConstant {
@@ -56,11 +56,21 @@ class Engine : public EventObserver
     void initCommands();
     void initSyncStructures();
 
+    void initDescriptorSetLayouts();
+
+    void initTextures();
+
     void initPipelines();
+
+    void initDescriptorPool();
+    void initDescriptorSets();
 
     void createMesh();
 
     FrameData& getCurrentFrame();
+
+    void renderGeometry(VkCommandBuffer& cmd);
+
     void render();
     void mainLoop();
 
@@ -86,6 +96,13 @@ class Engine : public EventObserver
 
     AllocatedImage m_DrawImage;
     AllocatedImage m_DepthImage;
+
+    AllocatedImage m_BoxTexture;
+    AllocatedImage m_FaceTexture;
+
+    VkDescriptorPool m_DescriptorPool;
+    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> m_MainDescriptors;
+    VkDescriptorSetLayout m_MainDescriptorLayout;
 
     Pipeline m_BasicPipeline;
 
