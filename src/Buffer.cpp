@@ -17,11 +17,30 @@ void AllocatedBuffer::createBuffer(VmaAllocator allocator, size_t allocSize,
 
     VK_CHECK(
         vmaCreateBuffer(allocator, &bufferCI, &vmaAllocCI, &buffer, &allocation, &allocationInfo));
+
+    m_Init = true;
 }
 
 void AllocatedBuffer::destroyBuffer(VmaAllocator allocator)
 {
+    if (!m_Init) return;
+
     vmaDestroyBuffer(allocator, buffer, allocation);
     buffer = VK_NULL_HANDLE;
     allocation = {};
+
+    m_Init = false;
+}
+
+void AllocatedBuffer::pushFromBuffer(VmaAllocator allocator, const AllocatedBuffer& buffer,
+                                     size_t size)
+{
+    ImmediateSubmit::submit([&](VkCommandBuffer cmd) {
+        VkBufferCopy copy{};
+        copy.srcOffset = 0;
+        copy.dstOffset = 0;
+        copy.size = size;
+
+        vkCmdCopyBuffer(cmd, buffer.buffer, this->buffer, 1, &copy);
+    });
 }

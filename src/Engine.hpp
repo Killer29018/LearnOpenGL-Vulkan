@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "Buffer.hpp"
+#include "Camera.hpp"
 #include "Descriptors.hpp"
 #include "EventHandler.hpp"
 #include "Image.hpp"
@@ -25,17 +26,32 @@ struct FrameData {
 };
 
 struct ObjectData {
-    glm::mat4 model;
+    alignas(16) glm::vec4 colour;
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 rotation;
+};
+
+struct LightGeneralData {
+    alignas(16) int lightCount;
+    alignas(16) glm::vec4 ambient;
+};
+
+struct LightData {
+    alignas(16) glm::vec3 position;
+    alignas(16) glm::vec4 colour;
+    alignas(16) glm::mat4 model;
 };
 
 struct Vertex {
     alignas(16) glm::vec3 position;
     alignas(16) glm::vec2 uv;
+    alignas(16) glm::vec3 normal;
 };
 
 struct VertexPushConstant {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+    alignas(16) glm::vec3 cameraPos;
     alignas(16) VkDeviceAddress vertexBuffer;
 };
 
@@ -65,6 +81,9 @@ class Engine : public EventObserver
 
     void createObjects();
 
+    void createLights();
+    void uploadLightData();
+
     void initPipelines();
 
     void initDescriptorPool();
@@ -76,6 +95,7 @@ class Engine : public EventObserver
 
     void renderGeometry(VkCommandBuffer& cmd);
 
+    void update();
     void render();
     void mainLoop();
 
@@ -112,9 +132,17 @@ class Engine : public EventObserver
     size_t m_ObjectCount;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_ObjectDataBuffer;
 
+    const size_t m_MaxLights = 10;
+    size_t m_LightCount = 0;
+    float m_LightTime = 0.0f;
+    std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_LightDataBuffer;
+
     Pipeline m_BasicPipeline;
+    Pipeline m_LightPipeline;
 
     Mesh m_BasicMesh;
+
+    Camera m_Camera;
 
     size_t m_CurrentFrame = 0;
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> m_Frames;

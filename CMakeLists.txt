@@ -5,6 +5,10 @@ project(LearnOpenGL-Vulkan)
 
 find_package(Vulkan REQUIRED)
 
+if(UNIX)
+find_package(glfw3 REQUIRED)
+endif()
+
 # Set C++ Standard
 set(CMAKE_CXX_STANDARD 20)
 

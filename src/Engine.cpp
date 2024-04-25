@@ -16,7 +16,10 @@ Engine::Engine()
     m_Window = std::make_unique<Window>();
     m_Window->init("LearnOpenGL-Vulkan", { 800, 800 });
 
+    m_Camera = Camera(glm::vec3(0.0f, 0.0f, 3.0f), 0.0f, 0.0f);
+
     m_Window->attachObserver(this);
+    m_Window->attachObserver(&m_Camera);
 
     initVulkan();
     initSwapchain();
@@ -32,6 +35,7 @@ Engine::Engine()
     initTextures();
 
     createObjects();
+    createLights();
 
     initDescriptorPool();
     initDescriptorSets();
@@ -53,7 +57,6 @@ void Engine::receiveEvent(const Event* event)
     {
     case EventType::KEYBOARD_PRESS:
         {
-            std::cout << "KEY PRESS\n";
             break;
         }
     default:
@@ -72,11 +75,15 @@ void Engine::cleanup()
 
     for (size_t i = 0; i < m_ObjectDataBuffer.size(); i++)
     {
+        m_LightDataBuffer[i].destroyBuffer(m_Allocator);
         m_ObjectDataBuffer[i].destroyBuffer(m_Allocator);
     }
 
     m_FaceTexture.destroy(m_Device, m_Allocator);
     m_BoxTexture.destroy(m_Device, m_Allocator);
+
+    vkDestroyPipeline(m_Device, m_LightPipeline.pipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_LightPipeline.pipelineLayout, nullptr);
 
     vkDestroyPipeline(m_Device, m_BasicPipeline.pipeline, nullptr);
     vkDestroyPipelineLayout(m_Device, m_BasicPipeline.pipelineLayout, nullptr);
@@ -133,14 +140,23 @@ void Engine::initVulkan()
     features.robustBufferAccess = true;
 
     vkb::PhysicalDeviceSelector selector{ vkbInst };
-    vkb::PhysicalDevice vkbPhysicalDevice = selector.set_minimum_version(1, 3)
-                                                .set_required_features_13(features13)
-                                                .set_required_features_12(features12)
-                                                .set_required_features_11(features11)
-                                                .set_required_features(features)
-                                                .set_surface(m_Surface)
-                                                .select()
-                                                .value();
+    auto vkbMaybeDevice = selector.set_minimum_version(1, 3)
+                              .set_required_features_13(features13)
+                              .set_required_features_12(features12)
+                              .set_required_features_11(features11)
+                              .set_required_features(features)
+                              .set_surface(m_Surface)
+                              .select();
+
+    // std::cout << std::format("{}: {}\n", vkbMaybeDevice.error().value(),
+    //                          vkbMaybeDevice.error().message());
+    if (!vkbMaybeDevice.has_value())
+    {
+        std::cout << std::format("{}: {}", vkbMaybeDevice.error().value(),
+                                 vkbMaybeDevice.error().message());
+    }
+
+    vkb::PhysicalDevice vkbPhysicalDevice = vkbMaybeDevice.value();
 
     vkb::DeviceBuilder deviceBuilder{ vkbPhysicalDevice };
     vkb::Device vkbDevice = deviceBuilder.build().value();
@@ -277,7 +293,15 @@ void Engine::initDescriptorSetLayouts()
     bufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     bufferBinding.pImmutableSamplers = nullptr;
 
-    std::vector<VkDescriptorSetLayoutBinding> bindings{ boxBinding, faceBinding, bufferBinding };
+    VkDescriptorSetLayoutBinding bufferBinding2{};
+    bufferBinding2.binding = 3;
+    bufferBinding2.descriptorCount = 1;
+    bufferBinding2.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bufferBinding2.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    bufferBinding2.pImmutableSamplers = nullptr;
+
+    std::vector<VkDescriptorSetLayoutBinding> bindings{ boxBinding, faceBinding, bufferBinding,
+                                                        bufferBinding2 };
 
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{};
     descriptorSetLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -297,7 +321,6 @@ void Engine::initPipelines()
 
     std::optional<VkShaderModule> vertShaderModule =
         PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
-
     std::optional<VkShaderModule> fragShaderModule =
         PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.frag.spv");
 
@@ -318,6 +341,27 @@ void Engine::initPipelines()
 
     vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
     vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+
+    vertShaderModule = PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.vert.spv");
+    fragShaderModule = PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.frag.spv");
+
+    PipelineBuilder::reset();
+    PipelineBuilder::addPushConstant(pushConstant);
+    PipelineBuilder::addDescriptorLayout(m_MainDescriptorLayout);
+    PipelineBuilder::setShaders(vertShaderModule.value(), fragShaderModule.value());
+    PipelineBuilder::inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
+                                VK_FRONT_FACE_CLOCKWISE);
+    PipelineBuilder::setMultisampleNone();
+    PipelineBuilder::disableBlending();
+    PipelineBuilder::setColourAttachmentFormat(m_DrawImage.imageFormat);
+    PipelineBuilder::setDepthFormat(m_DepthImage.imageFormat);
+    PipelineBuilder::enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS);
+
+    m_LightPipeline = PipelineBuilder::build(m_Device);
+
+    vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+    vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
 }
 
 void Engine::initTextures()
@@ -334,7 +378,7 @@ void Engine::initTextures()
 void Engine::createObjects()
 {
     std::vector<glm::vec3> cubePositions = {
-        glm::vec3(0.0f, -0.0f, 0.0f),  glm::vec3(2.0f, -5.0f, -15.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f),   glm::vec3(2.0f, -5.0f, -15.0f),
         glm::vec3(-1.5f, 2.2f, -2.5f), glm::vec3(-3.8f, 2.0f, -12.3f),
         glm::vec3(2.4f, 0.4f, -3.5f),  glm::vec3(-1.7f, -3.0f, -7.5f),
         glm::vec3(1.3f, 2.0f, -2.5f),  glm::vec3(1.5f, -2.0f, -2.5f),
@@ -353,7 +397,12 @@ void Engine::createObjects()
         float angle = 20.0f * i;
         model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, -0.3f, 0.5f));
 
-        models.at(i) = { .model = model };
+        glm::mat4 rotation =
+            glm::rotate(glm::mat4(1.0f), glm::radians(angle), glm::vec3(1.0f, -0.3f, 0.5f));
+
+        models.at(i) = { .colour = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),
+                         .model = model,
+                         .rotation = rotation };
     }
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
@@ -362,27 +411,65 @@ void Engine::createObjects()
                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                            VMA_MEMORY_USAGE_GPU_ONLY);
+
+        m_ObjectDataBuffer[i].pushData<ObjectData>(m_Allocator, models);
+    }
+}
+
+void Engine::createLights()
+{
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        m_LightDataBuffer[i].createBuffer(
+            m_Allocator, sizeof(LightData) * m_MaxLights + sizeof(LightGeneralData),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VMA_MEMORY_USAGE_GPU_ONLY);
     }
 
-    AllocatedBuffer stagingBuffer;
-    stagingBuffer.createBuffer(m_Allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                               VMA_MEMORY_USAGE_CPU_TO_GPU);
+    uploadLightData();
+}
 
-    memcpy(stagingBuffer.allocationInfo.pMappedData, models.data(), size);
+void Engine::uploadLightData()
+{
+    float time = 0.001f * m_LightTime;
+    glm::vec3 movingLightPosition = glm::vec3(10 * sin(time), 0.0f, 10 * cos(time));
+    glm::vec3 movingLightColour = glm::vec3(cos(time) + sin(time), cos(time), sin(time));
 
-    ImmediateSubmit::submit([&](VkCommandBuffer cmd) {
-        VkBufferCopy copy{};
-        copy.srcOffset = 0;
-        copy.dstOffset = 0;
-        copy.size = size;
+    std::vector<LightData> lights = {
+  // { .position = glm::vec3(0.0f, -2.0f, 0.0f), .colour = glm::vec4(1.0f) },
+        {.position = movingLightPosition, .colour = glm::vec4(movingLightColour, 1.0f)}
+    };
+    m_LightCount = lights.size();
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_ObjectDataBuffer[i].buffer, 1, &copy);
-        }
-    });
+    LightGeneralData generalData;
+    generalData.lightCount = lights.size();
+    generalData.ambient = glm::vec4(1.0f, 1.0f, 1.0f, 0.1f);
 
-    stagingBuffer.destroyBuffer(m_Allocator);
+    for (size_t i = 0; i < lights.size(); i++)
+    {
+        glm::mat4 model{ 1.0f };
+        model = glm::translate(model, lights[i].position);
+        model = glm::scale(model, glm::vec3(0.2f));
+        lights[i].model = model;
+    }
+
+    size_t size = lights.size() * sizeof(LightData) + sizeof(LightGeneralData);
+
+    AllocatedBuffer staging;
+    staging.createBuffer(m_Allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                         VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    memcpy(staging.allocationInfo.pMappedData, &generalData, sizeof(LightGeneralData));
+
+    memcpy((char*)staging.allocationInfo.pMappedData + sizeof(LightGeneralData), lights.data(),
+           lights.size() * sizeof(LightData));
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        m_LightDataBuffer[i].pushFromBuffer(m_Allocator, staging, size);
+    }
+
+    staging.destroyBuffer(m_Allocator);
 }
 
 void Engine::initDescriptorPool()
@@ -391,7 +478,7 @@ void Engine::initDescriptorPool()
         {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2},
         { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)    }
+         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2}
     };
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{};
@@ -433,6 +520,11 @@ void Engine::initDescriptorSets()
         descriptorBI.offset = 0;
         descriptorBI.range = m_ObjectCount * sizeof(ObjectData);
 
+        VkDescriptorBufferInfo descriptor2BI{};
+        descriptor2BI.buffer = m_LightDataBuffer[i].buffer;
+        descriptor2BI.offset = 0;
+        descriptor2BI.range = m_MaxLights * sizeof(LightData) + sizeof(int);
+
         std::vector<VkWriteDescriptorSet> descriptorWrite{};
         descriptorWrite.push_back(
             VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -464,6 +556,16 @@ void Engine::initDescriptorSets()
                                   .pImageInfo = nullptr,
                                   .pBufferInfo = &descriptorBI,
                                   .pTexelBufferView = nullptr });
+        descriptorWrite.push_back(
+            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                  .dstSet = m_MainDescriptors[i],
+                                  .dstBinding = 3,
+                                  .dstArrayElement = 0,
+                                  .descriptorCount = 1,
+                                  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                  .pImageInfo = nullptr,
+                                  .pBufferInfo = &descriptor2BI,
+                                  .pTexelBufferView = nullptr });
 
         vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrite.size()),
                                descriptorWrite.data(), 0, nullptr);
@@ -474,40 +576,84 @@ void Engine::createMesh()
 {
     std::vector<Vertex> vertices = {
   // Front: 0-3
-        {.position = { -0.5f, -0.5f, 0.5f },   .uv = { 0.0f, 0.0f }},
-        { .position = { 0.5f, -0.5f, 0.5f },   .uv = { 1.0f, 0.0f }},
-        { .position = { -0.5f, 0.5f, 0.5f },   .uv = { 0.0f, 1.0f }},
-        { .position = { 0.5f, 0.5f, 0.5f },    .uv = { 1.0f, 1.0f }},
+        { .position = { -0.5f, -0.5f, 0.5f },
+         .uv = { 0.0f, 0.0f },
+         .normal = { 0.0f, 0.0f, 1.0f } },
+        { .position = { 0.5f, -0.5f, 0.5f }, .uv = { 1.0f, 0.0f }, .normal = { 0.0f, 0.0f, 1.0f } },
+        { .position = { -0.5f, 0.5f, 0.5f }, .uv = { 0.0f, 1.0f }, .normal = { 0.0f, 0.0f, 1.0f } },
+        { .position = { 0.5f, 0.5f, 0.5f }, .uv = { 1.0f, 1.0f }, .normal = { 0.0f, 0.0f, 1.0f } },
 
  // Back: 4-7
-        { .position = { 0.5f, -0.5f, -0.5f },  .uv = { 0.0f, 0.0f }},
-        { .position = { -0.5f, -0.5f, -0.5f }, .uv = { 1.0f, 0.0f }},
-        { .position = { 0.5f, 0.5f, -0.5f },   .uv = { 0.0f, 1.0f }},
-        { .position = { -0.5f, 0.5f, -0.5f },  .uv = { 1.0f, 1.0f }},
+        { .position = { 0.5f, -0.5f, -0.5f },
+         .uv = { 0.0f, 0.0f },
+         .normal = { 0.0f, 0.0f, -1.0f } },
+        { .position = { -0.5f, -0.5f, -0.5f },
+         .uv = { 1.0f, 0.0f },
+         .normal = { 0.0f, 0.0f, -1.0f } },
+        { .position = { 0.5f, 0.5f, -0.5f },
+         .uv = { 0.0f, 1.0f },
+         .normal = { 0.0f, 0.0f, -1.0f } },
+        { .position = { -0.5f, 0.5f, -0.5f },
+         .uv = { 1.0f, 1.0f },
+         .normal = { 0.0f, 0.0f, -1.0f } },
 
  // Right: 8-11
-        { .position = { 0.5f, -0.5f, 0.5f },   .uv = { 0.0f, 0.0f }},
-        { .position = { 0.5f, -0.5f, -0.5f },  .uv = { 1.0f, 0.0f }},
-        { .position = { 0.5f, 0.5f, 0.5f },    .uv = { 0.0f, 1.0f }},
-        { .position = { 0.5f, 0.5f, -0.5f },   .uv = { 1.0f, 1.0f }},
+        {
+         .position = { 0.5f, -0.5f, 0.5f },
+         .uv = { 0.0f, 0.0f },
+         .normal = { 1.0f, 0.0f, 0.0f },
+         },
+        {
+         .position = { 0.5f, -0.5f, -0.5f },
+         .uv = { 1.0f, 0.0f },
+         .normal = { 1.0f, 0.0f, 0.0f },
+         },
+        {
+         .position = { 0.5f, 0.5f, 0.5f },
+         .uv = { 0.0f, 1.0f },
+         .normal = { 1.0f, 0.0f, 0.0f },
+         },
+        {
+         .position = { 0.5f, 0.5f, -0.5f },
+         .uv = { 1.0f, 1.0f },
+         .normal = { 1.0f, 0.0f, 0.0f },
+         },
 
  // Left: 12-15
-        { .position = { -0.5f, -0.5f, -0.5f }, .uv = { 0.0f, 0.0f }},
-        { .position = { -0.5f, -0.5f, 0.5f },  .uv = { 1.0f, 0.0f }},
-        { .position = { -0.5f, 0.5f, -0.5f },  .uv = { 0.0f, 1.0f }},
-        { .position = { -0.5f, 0.5f, 0.5f },   .uv = { 1.0f, 1.0f }},
+        { .position = { -0.5f, -0.5f, -0.5f },
+         .uv = { 0.0f, 0.0f },
+         .normal = { -1.0f, 0.0f, 0.0f } },
+        { .position = { -0.5f, -0.5f, 0.5f },
+         .uv = { 1.0f, 0.0f },
+         .normal = { -1.0f, 0.0f, 0.0f } },
+        { .position = { -0.5f, 0.5f, -0.5f },
+         .uv = { 0.0f, 1.0f },
+         .normal = { -1.0f, 0.0f, 0.0f } },
+        { .position = { -0.5f, 0.5f, 0.5f },
+         .uv = { 1.0f, 1.0f },
+         .normal = { -1.0f, 0.0f, 0.0f } },
 
  // Top: 16-19
-        { .position = { -0.5f, -0.5f, -0.5f }, .uv = { 0.0f, 0.0f }},
-        { .position = { 0.5f, -0.5f, -0.5f },  .uv = { 1.0f, 0.0f }},
-        { .position = { -0.5f, -0.5f, 0.5f },  .uv = { 0.0f, 1.0f }},
-        { .position = { 0.5f, -0.5f, 0.5f },   .uv = { 1.0f, 1.0f }},
+        { .position = { -0.5f, -0.5f, -0.5f },
+         .uv = { 0.0f, 0.0f },
+         .normal = { 0.0f, -1.0f, 0.0f } },
+        { .position = { 0.5f, -0.5f, -0.5f },
+         .uv = { 1.0f, 0.0f },
+         .normal = { 0.0f, -1.0f, 0.0f } },
+        { .position = { -0.5f, -0.5f, 0.5f },
+         .uv = { 0.0f, 1.0f },
+         .normal = { 0.0f, -1.0f, 0.0f } },
+        { .position = { 0.5f, -0.5f, 0.5f },
+         .uv = { 1.0f, 1.0f },
+         .normal = { 0.0f, -1.0f, 0.0f } },
 
  // Bottom: 20-23
-        { .position = { -0.5f, 0.5f, 0.5f },   .uv = { 0.0f, 0.0f }},
-        { .position = { 0.5f, 0.5f, 0.5f },    .uv = { 1.0f, 0.0f }},
-        { .position = { -0.5f, 0.5f, -0.5f },  .uv = { 0.0f, 1.0f }},
-        { .position = { 0.5f, 0.5f, -0.5f },   .uv = { 1.0f, 1.0f }},
+        { .position = { -0.5f, 0.5f, 0.5f }, .uv = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f } },
+        { .position = { 0.5f, 0.5f, 0.5f }, .uv = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f } },
+        { .position = { -0.5f, 0.5f, -0.5f },
+         .uv = { 0.0f, 1.0f },
+         .normal = { 0.0f, 1.0f, 0.0f } },
+        { .position = { 0.5f, 0.5f, -0.5f }, .uv = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f } },
     };
 
     std::vector<uint32_t> indices = {
@@ -525,10 +671,6 @@ FrameData& Engine::getCurrentFrame() { return m_Frames[m_CurrentFrame % MAX_FRAM
 
 void Engine::renderGeometry(VkCommandBuffer& cmd)
 {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipelineLayout, 0,
-                            1, &m_MainDescriptors[m_CurrentFrame % 2], 0, nullptr);
-
     VkViewport viewport{};
     viewport.x = 0;
     viewport.y = 0;
@@ -537,29 +679,58 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
     VkRect2D scissor{};
     scissor.offset.x = 0.0f;
     scissor.offset.y = 0.0f;
     scissor.extent.width = m_DrawImage.imageExtent.width;
     scissor.extent.height = m_DrawImage.imageExtent.height;
 
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipelineLayout, 0,
+                            1, &m_MainDescriptors[m_CurrentFrame % 2], 0, nullptr);
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
     VertexPushConstant pushConstantData;
-    pushConstantData.view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
-    pushConstantData.proj = glm::perspective(
-        glm::radians(70.0f), (float)m_Window->getSize().x / (float)m_Window->getSize().y, 0.01f,
-        1000.0f);
+    pushConstantData.view = m_Camera.getView();
+    pushConstantData.proj = m_Camera.getPerspective(m_Window->getSize());
+    pushConstantData.cameraPos = m_Camera.getPosition();
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
 
     vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                        sizeof(VertexPushConstant), &pushConstantData);
 
     vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_ObjectCount, 0, 0, 0);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipeline.pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipeline.pipelineLayout, 0,
+                            1, &m_MainDescriptors[m_CurrentFrame % 2], 0, nullptr);
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    vkCmdPushConstants(cmd, m_LightPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(VertexPushConstant), &pushConstantData);
+
+    vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_LightCount, 0, 0, 0);
+}
+
+void Engine::update()
+{
+    static auto previousTime = std::chrono::system_clock::now();
+    auto newTime = std::chrono::system_clock::now();
+    double dt =
+        std::chrono::duration_cast<std::chrono::milliseconds>(newTime - previousTime).count();
+    previousTime = newTime;
+    m_Camera.update(dt);
+
+    m_LightTime += dt;
+    uploadLightData();
 }
 
 void Engine::render()
@@ -715,7 +886,7 @@ void Engine::mainLoop()
     {
         m_Window->getEvents();
 
-        // glfwSetWindowShouldClose(m_Window->getWindow(), true);
+        update();
 
         render();
 

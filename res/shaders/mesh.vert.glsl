@@ -1,36 +1,15 @@
 #version 460
 #extension GL_EXT_buffer_reference : enable
+#extension GL_GOOGLE_include_directive : require
+
+#include "vertex.glsl"
+#include "object.glsl"
 
 layout (location = 0) out vec2 v_UV;
-
-struct Vertex
-{
-    vec3 position;
-    vec2 UV;
-    // vec4 colour;
-};
-
-struct ObjectData
-{
-    mat4 model;
-};
-
-layout (buffer_reference, std430) readonly buffer VertexBuffer
-{
-    Vertex vertices[];
-};
-
-layout (push_constant) uniform constants
-{
-    mat4 view;
-    mat4 proj;
-    VertexBuffer vertexBuffer;
-} PushConstants;
-
-layout (std430, binding=2) buffer readonly Model
-{
-    ObjectData objects[];
-} u_Models;
+layout (location = 1) out vec4 v_Colour;
+layout (location = 2) out vec3 v_Normal;
+layout (location = 3) out vec3 v_FragPos;
+layout (location = 4) out vec3 v_CameraPos;
 
 void main()
 {
@@ -42,4 +21,9 @@ void main()
     gl_Position = PushConstants.proj * PushConstants.view * model * vec4(v.position, 1.0);
 
     v_UV = v.UV;
+    v_Colour = data.colour;
+    v_Normal = vec3(data.rotation * vec4(v.normal, 1.0));
+    v_FragPos = vec3(model * vec4(v.position, 1.0));
+
+    v_CameraPos = PushConstants.cameraPos;
 }

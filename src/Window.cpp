@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "ErrorCheck.hpp"
+#include <stdexcept>
 
 Window::Window() {}
 
@@ -22,7 +23,7 @@ void Window::init(const std::string& name, glm::ivec2 windowSize)
 
     if (!glfwInit())
     {
-        std::runtime_error("Failed to initialize GLFW");
+        throw std::runtime_error("Failed to initialize GLFW");
     }
     m_WindowSize = windowSize;
 
@@ -33,12 +34,16 @@ void Window::init(const std::string& name, glm::ivec2 windowSize)
 
     if (!m_Window)
     {
-        std::runtime_error("Failed to create Window");
+        throw std::runtime_error("Failed to create Window");
     }
+
+    glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     glfwSetWindowUserPointer(m_Window, this);
 
     glfwSetKeyCallback(m_Window, keyboardCallback);
+    glfwSetCursorPosCallback(m_Window, mouseCallback);
+    glfwSetWindowFocusCallback(m_Window, mouseEnterCallback);
 }
 
 bool Window::shouldClose() { return glfwWindowShouldClose(m_Window); }
@@ -65,4 +70,38 @@ void Window::keyboardCallback(GLFWwindow* window, int key, int scancode, int act
     kpEvent.keyAction = action;
     kpEvent.mods = mods;
     w->dispatchEvent(&kpEvent);
+}
+
+void Window::mouseCallback(GLFWwindow* window, double xPos, double yPos)
+{
+    static double lastX, lastY;
+
+    Window* w = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
+
+    if (w->m_FirstMouse)
+    {
+        lastX = xPos;
+        lastY = yPos;
+
+        w->m_FirstMouse = false;
+    }
+
+    double xOffset = xPos - lastX;
+    double yOffset = lastY - yPos;
+
+    lastX = xPos;
+    lastY = yPos;
+
+    MouseMoveEvent mmEvent;
+    mmEvent.xOffset = xOffset;
+    mmEvent.yOffset = yOffset;
+    mmEvent.xPos = xPos;
+    mmEvent.yPos = yPos;
+    w->dispatchEvent(&mmEvent);
+}
+
+void Window::mouseEnterCallback(GLFWwindow* window, int entered)
+{
+    Window* w = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (entered) w->m_FirstMouse = true;
 }

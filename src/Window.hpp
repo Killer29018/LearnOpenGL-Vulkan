@@ -1,5 +1,7 @@
 #define pragma
 
+#include <vulkan/vulkan.h>
+
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -30,8 +32,12 @@ class Window : public EventDispatcher
 
   private:
     static void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+    static void mouseCallback(GLFWwindow* window, double xpos, double ypos);
+    static void mouseEnterCallback(GLFWwindow* window, int entered);
 
   private:
     GLFWwindow* m_Window = nullptr;
     glm::ivec2 m_WindowSize;
+
+    bool m_FirstMouse = true;
 };
