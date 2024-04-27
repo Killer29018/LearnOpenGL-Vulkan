@@ -10,6 +10,7 @@ layout (location = 1) out vec4 v_Colour;
 layout (location = 2) out vec3 v_Normal;
 layout (location = 3) out vec3 v_FragPos;
 layout (location = 4) out vec3 v_CameraPos;
+layout (location = 5) out flat int v_MaterialIndex;
 
 void main()
 {
@@ -26,4 +27,6 @@ void main()
     v_FragPos = vec3(model * vec4(v.position, 1.0));
 
     v_CameraPos = PushConstants.cameraPos;
+
+    v_MaterialIndex = data.materialIndex;
 }

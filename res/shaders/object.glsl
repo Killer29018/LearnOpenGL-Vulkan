@@ -1,5 +1,6 @@
 struct ObjectData
 {
+    int materialIndex;
     vec4 colour;
     mat4 model;
     mat4 rotation;

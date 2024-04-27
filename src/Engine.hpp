@@ -26,6 +26,7 @@ struct FrameData {
 };
 
 struct ObjectData {
+    alignas(16) int materialIndex;
     alignas(16) glm::vec4 colour;
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 rotation;
@@ -38,8 +39,15 @@ struct LightGeneralData {
 
 struct LightData {
     alignas(16) glm::vec3 position;
-    alignas(16) glm::vec4 colour;
     alignas(16) glm::mat4 model;
+    alignas(16) glm::vec3 diffuse;
+    alignas(16) glm::vec3 specular;
+};
+
+struct MaterialData {
+    alignas(16) glm::vec3 ambient;
+    alignas(16) glm::vec3 diffuse;
+    alignas(16) glm::vec4 specular;
 };
 
 struct Vertex {
@@ -79,6 +87,7 @@ class Engine : public EventObserver
 
     void initTextures();
 
+    void createMaterials();
     void createObjects();
 
     void createLights();
@@ -133,6 +142,9 @@ class Engine : public EventObserver
     VkDescriptorSetLayout m_LightDescriptorLayout;
     std::vector<VkDescriptorSet> m_LightDescriptors;
 
+    VkDescriptorSetLayout m_MaterialDescriptorLayout;
+    std::vector<VkDescriptorSet> m_MaterialDescriptors;
+
     size_t m_ObjectCount;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_ObjectDataBuffer;
 
@@ -140,6 +152,9 @@ class Engine : public EventObserver
     size_t m_LightCount = 0;
     float m_LightTime = 0.0f;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_LightDataBuffer;
+
+    const size_t m_MaxMaterials = 10;
+    std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_MaterialDataBuffer;
 
     VkPipelineLayout m_MeshPipelineLayout;
     VkPipeline m_MeshPipeline;

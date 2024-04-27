@@ -16,5 +16,5 @@ void main()
 
     gl_Position = PushConstants.proj * PushConstants.view * model * vec4(v.position, 1.0);
 
-    v_Colour = data.colour;
+    v_Colour = vec4(data.diffuse, 1.0);
 }

@@ -34,6 +34,7 @@ Engine::Engine()
 
     initTextures();
 
+    createMaterials();
     createObjects();
     createLights();
 
@@ -71,6 +72,7 @@ void Engine::cleanup()
     ImmediateSubmit::free();
 
     vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_MaterialDescriptorLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_Device, m_ObjectDescriptorLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_Device, m_LightDescriptorLayout, nullptr);
 
@@ -78,6 +80,7 @@ void Engine::cleanup()
     {
         m_LightDataBuffer[i].destroyBuffer(m_Allocator);
         m_ObjectDataBuffer[i].destroyBuffer(m_Allocator);
+        m_MaterialDataBuffer[i].destroyBuffer(m_Allocator);
     }
 
     m_FaceTexture.destroy(m_Device, m_Allocator);
@@ -281,6 +284,10 @@ void Engine::initDescriptorSetLayouts()
         DescriptorLayoutBuilder::start(m_Device)
             .addStorageBuffer(0, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
             .build();
+
+    m_MaterialDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
+                                     .addStorageBuffer(0, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                     .build();
 }
 
 void Engine::initPipelines()
@@ -292,7 +299,8 @@ void Engine::initPipelines()
 
     {
         m_MeshPipelineLayout = PipelineLayoutBuilder::build(
-            m_Device, { pushConstant }, { m_LightDescriptorLayout, m_ObjectDescriptorLayout });
+            m_Device, { pushConstant },
+            { m_LightDescriptorLayout, m_ObjectDescriptorLayout, m_MaterialDescriptorLayout });
 
         std::optional<VkShaderModule> vertShaderModule =
             PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
@@ -352,6 +360,29 @@ void Engine::initTextures()
     m_FaceTexture.createSampler(m_Device, VK_FILTER_LINEAR);
 }
 
+void Engine::createMaterials()
+{
+    std::vector<MaterialData> materials = {
+        MaterialData{
+                     .ambient = glm::vec3(0.3f),
+                     .diffuse = glm::vec3(1.0f),
+                     .specular = glm::vec4(1.0f, 1.0f, 1.0f, 32.0f),
+                     }
+    };
+
+    size_t size = m_MaxMaterials * sizeof(MaterialData);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        m_MaterialDataBuffer[i].createBuffer(m_Allocator, size,
+                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             VMA_MEMORY_USAGE_GPU_ONLY);
+
+        m_MaterialDataBuffer[i].pushData<MaterialData>(m_Allocator, materials);
+    }
+}
+
 void Engine::createObjects()
 {
     std::vector<glm::vec3> cubePositions = {
@@ -377,7 +408,8 @@ void Engine::createObjects()
         glm::mat4 rotation =
             glm::rotate(glm::mat4(1.0f), glm::radians(angle), glm::vec3(1.0f, -0.3f, 0.5f));
 
-        models.at(i) = { .colour = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),
+        models.at(i) = { .materialIndex = 0,
+                         .colour = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),
                          .model = model,
                          .rotation = rotation };
     }
@@ -415,7 +447,9 @@ void Engine::uploadLightData()
 
     std::vector<LightData> lights = {
   // { .position = glm::vec3(0.0f, -2.0f, 0.0f), .colour = glm::vec4(1.0f) },
-        {.position = movingLightPosition, .colour = glm::vec4(movingLightColour, 1.0f)}
+        {.position = movingLightPosition,
+         .diffuse = glm::vec3(movingLightColour * 0.2f),
+         .specular = glm::vec3(1.0f)}
     };
     m_LightCount = lights.size();
 
@@ -455,10 +489,10 @@ void Engine::initDescriptorPool()
     std::vector<VkDescriptorPoolSize> poolSizes = {
         {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
          .descriptorCount = MAX_FRAMES_IN_FLIGHT * 2                                                   },
-        { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        .descriptorCount = MAX_FRAMES_IN_FLIGHT * 2}
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        .descriptorCount = MAX_FRAMES_IN_FLIGHT * 3}
     };
 
-    const uint32_t maxSets = MAX_FRAMES_IN_FLIGHT * 2;
+    const uint32_t maxSets = MAX_FRAMES_IN_FLIGHT * 3;
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{};
     descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -486,6 +520,12 @@ void Engine::initDescriptorSets()
                                     m_LightDescriptorLayout)
             .addStorageBuffers(0, m_LightDataBuffer, 0,
                                m_MaxLights * sizeof(LightData) + sizeof(LightGeneralData))
+            .build();
+
+    m_MaterialDescriptors =
+        DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
+                                    m_MaterialDescriptorLayout)
+            .addStorageBuffers(0, m_MaterialDataBuffer, 0, m_MaxMaterials * sizeof(MaterialData))
             .build();
 }
 
@@ -608,6 +648,8 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
                             &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 1, 1,
                             &m_ObjectDescriptors[m_CurrentFrame % 2], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 2, 1,
+                            &m_MaterialDescriptors[m_CurrentFrame % 2], 0, nullptr);
 
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);

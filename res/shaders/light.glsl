@@ -1,8 +1,9 @@
 struct LightData
 {
     vec3 position;
-    vec4 colour;
     mat4 model;
+    vec3 diffuse;
+    vec3 specular;
 };
 
 layout (std430, set=0, binding=0) buffer readonly Lights
