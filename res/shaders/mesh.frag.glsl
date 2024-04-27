@@ -11,8 +11,8 @@ layout (location = 4) in vec3 v_CameraPos;
 
 layout (location = 0) out vec4 f_Colour;
 
-layout(binding = 0) uniform sampler2D u_BoxSampler;
-layout(binding = 1) uniform sampler2D u_FaceSampler;
+layout(set=1, binding = 0) uniform sampler2D u_BoxSampler;
+layout(set=1, binding = 1) uniform sampler2D u_FaceSampler;
 
 void main()
 {
@@ -45,7 +45,7 @@ void main()
     colour += diffuse;
     colour += specular;
 
-    colour = v_Colour.rgb * colour.rgb;
+    colour = mix(box, face, 0.5).rgb * colour.rgb;
 
     // f_Colour = mix(box, face, 0.5);
     f_Colour = vec4(colour, 1.0);

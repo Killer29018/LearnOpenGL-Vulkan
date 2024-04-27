@@ -71,7 +71,8 @@ void Engine::cleanup()
     ImmediateSubmit::free();
 
     vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
-    vkDestroyDescriptorSetLayout(m_Device, m_MainDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_ObjectDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_LightDescriptorLayout, nullptr);
 
     for (size_t i = 0; i < m_ObjectDataBuffer.size(); i++)
     {
@@ -82,11 +83,11 @@ void Engine::cleanup()
     m_FaceTexture.destroy(m_Device, m_Allocator);
     m_BoxTexture.destroy(m_Device, m_Allocator);
 
-    vkDestroyPipeline(m_Device, m_LightPipeline.pipeline, nullptr);
-    vkDestroyPipelineLayout(m_Device, m_LightPipeline.pipelineLayout, nullptr);
+    vkDestroyPipeline(m_Device, m_LightPipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_LightPipelineLayout, nullptr);
 
-    vkDestroyPipeline(m_Device, m_BasicPipeline.pipeline, nullptr);
-    vkDestroyPipelineLayout(m_Device, m_BasicPipeline.pipelineLayout, nullptr);
+    vkDestroyPipeline(m_Device, m_MeshPipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_MeshPipelineLayout, nullptr);
     for (size_t i = 0; i < m_Frames.size(); i++)
     {
         vkDestroySemaphore(m_Device, m_Frames[i].renderSemaphore, nullptr);
@@ -148,8 +149,6 @@ void Engine::initVulkan()
                               .set_surface(m_Surface)
                               .select();
 
-    // std::cout << std::format("{}: {}\n", vkbMaybeDevice.error().value(),
-    //                          vkbMaybeDevice.error().message());
     if (!vkbMaybeDevice.has_value())
     {
         std::cout << std::format("{}: {}", vkbMaybeDevice.error().value(),
@@ -272,44 +271,16 @@ void Engine::initSyncStructures()
 
 void Engine::initDescriptorSetLayouts()
 {
-    VkDescriptorSetLayoutBinding boxBinding{};
-    boxBinding.binding = 0;
-    boxBinding.descriptorCount = 1;
-    boxBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    boxBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    boxBinding.pImmutableSamplers = nullptr;
+    m_ObjectDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
+                                   .addCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                   .addCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                   .addStorageBuffer(2, VK_SHADER_STAGE_VERTEX_BIT)
+                                   .build();
 
-    VkDescriptorSetLayoutBinding faceBinding{};
-    faceBinding.binding = 1;
-    faceBinding.descriptorCount = 1;
-    faceBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    faceBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    faceBinding.pImmutableSamplers = nullptr;
-
-    VkDescriptorSetLayoutBinding bufferBinding{};
-    bufferBinding.binding = 2;
-    bufferBinding.descriptorCount = 1;
-    bufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    bufferBinding.pImmutableSamplers = nullptr;
-
-    VkDescriptorSetLayoutBinding bufferBinding2{};
-    bufferBinding2.binding = 3;
-    bufferBinding2.descriptorCount = 1;
-    bufferBinding2.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bufferBinding2.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    bufferBinding2.pImmutableSamplers = nullptr;
-
-    std::vector<VkDescriptorSetLayoutBinding> bindings{ boxBinding, faceBinding, bufferBinding,
-                                                        bufferBinding2 };
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{};
-    descriptorSetLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCI.bindingCount = static_cast<uint32_t>(bindings.size());
-    descriptorSetLayoutCI.pBindings = bindings.data();
-
-    VK_CHECK(vkCreateDescriptorSetLayout(m_Device, &descriptorSetLayoutCI, nullptr,
-                                         &m_MainDescriptorLayout));
+    m_LightDescriptorLayout =
+        DescriptorLayoutBuilder::start(m_Device)
+            .addStorageBuffer(0, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+            .build();
 }
 
 void Engine::initPipelines()
@@ -319,49 +290,55 @@ void Engine::initPipelines()
     pushConstant.offset = 0;
     pushConstant.size = sizeof(VertexPushConstant);
 
-    std::optional<VkShaderModule> vertShaderModule =
-        PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
-    std::optional<VkShaderModule> fragShaderModule =
-        PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.frag.spv");
+    {
+        m_MeshPipelineLayout = PipelineLayoutBuilder::build(
+            m_Device, { pushConstant }, { m_LightDescriptorLayout, m_ObjectDescriptorLayout });
 
-    PipelineBuilder::reset();
-    PipelineBuilder::addPushConstant(pushConstant);
-    PipelineBuilder::addDescriptorLayout(m_MainDescriptorLayout);
-    PipelineBuilder::setShaders(vertShaderModule.value(), fragShaderModule.value());
-    PipelineBuilder::inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
-                                VK_FRONT_FACE_CLOCKWISE);
-    PipelineBuilder::setMultisampleNone();
-    PipelineBuilder::disableBlending();
-    PipelineBuilder::setColourAttachmentFormat(m_DrawImage.imageFormat);
-    PipelineBuilder::setDepthFormat(m_DepthImage.imageFormat);
-    PipelineBuilder::enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS);
+        std::optional<VkShaderModule> vertShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
+        std::optional<VkShaderModule> fragShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.frag.spv");
 
-    m_BasicPipeline = PipelineBuilder::build(m_Device);
+        m_MeshPipeline =
+            PipelineBuilder::start(m_Device, m_MeshPipelineLayout)
+                .setShaders(vertShaderModule.value(), fragShaderModule.value())
+                .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                .setMultisampleNone()
+                .disableBlending()
+                .setColourAttachmentFormat(m_DrawImage.imageFormat)
+                .setDepthFormat(m_DepthImage.imageFormat)
+                .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS)
+                .build();
 
-    vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
-    vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+    }
 
-    vertShaderModule = PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.vert.spv");
-    fragShaderModule = PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.frag.spv");
+    {
+        m_LightPipelineLayout =
+            PipelineLayoutBuilder::build(m_Device, { pushConstant }, { m_LightDescriptorLayout });
 
-    PipelineBuilder::reset();
-    PipelineBuilder::addPushConstant(pushConstant);
-    PipelineBuilder::addDescriptorLayout(m_MainDescriptorLayout);
-    PipelineBuilder::setShaders(vertShaderModule.value(), fragShaderModule.value());
-    PipelineBuilder::inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    PipelineBuilder::rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
-                                VK_FRONT_FACE_CLOCKWISE);
-    PipelineBuilder::setMultisampleNone();
-    PipelineBuilder::disableBlending();
-    PipelineBuilder::setColourAttachmentFormat(m_DrawImage.imageFormat);
-    PipelineBuilder::setDepthFormat(m_DepthImage.imageFormat);
-    PipelineBuilder::enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS);
+        std::optional<VkShaderModule> vertShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.vert.spv");
+        std::optional<VkShaderModule> fragShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.frag.spv");
 
-    m_LightPipeline = PipelineBuilder::build(m_Device);
+        m_LightPipeline =
+            PipelineBuilder::start(m_Device, m_LightPipelineLayout)
+                .setShaders(vertShaderModule.value(), fragShaderModule.value())
+                .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                .setMultisampleNone()
+                .disableBlending()
+                .setColourAttachmentFormat(m_DrawImage.imageFormat)
+                .setDepthFormat(m_DepthImage.imageFormat)
+                .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS)
+                .build();
 
-    vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
-    vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+    }
 }
 
 void Engine::initTextures()
@@ -433,7 +410,8 @@ void Engine::uploadLightData()
 {
     float time = 0.001f * m_LightTime;
     glm::vec3 movingLightPosition = glm::vec3(10 * sin(time), 0.0f, 10 * cos(time));
-    glm::vec3 movingLightColour = glm::vec3(cos(time) + sin(time), cos(time), sin(time));
+    glm::vec3 movingLightColour =
+        glm::vec3(fabs(cos(time) + sin(time)), fabs(cos(time)), fabs(sin(time)));
 
     std::vector<LightData> lights = {
   // { .position = glm::vec3(0.0f, -2.0f, 0.0f), .colour = glm::vec4(1.0f) },
@@ -476,100 +454,39 @@ void Engine::initDescriptorPool()
 {
     std::vector<VkDescriptorPoolSize> poolSizes = {
         {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2},
-        { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-         .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2}
+         .descriptorCount = MAX_FRAMES_IN_FLIGHT * 2                                                   },
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        .descriptorCount = MAX_FRAMES_IN_FLIGHT * 2}
     };
+
+    const uint32_t maxSets = MAX_FRAMES_IN_FLIGHT * 2;
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{};
     descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     descriptorPoolCI.pPoolSizes = poolSizes.data();
-    descriptorPoolCI.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    descriptorPoolCI.maxSets = maxSets;
 
     VK_CHECK(vkCreateDescriptorPool(m_Device, &descriptorPoolCI, nullptr, &m_DescriptorPool));
 }
 
 void Engine::initDescriptorSets()
 {
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts(MAX_FRAMES_IN_FLIGHT,
-                                                            m_MainDescriptorLayout);
+    m_ObjectDescriptors =
+        DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
+                                    m_ObjectDescriptorLayout)
+            .addCombinedImageSampler(0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_BoxTexture.imageView, m_BoxTexture.imageSampler.value())
+            .addCombinedImageSampler(1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_FaceTexture.imageView, m_FaceTexture.imageSampler.value())
+            .addStorageBuffers(2, m_ObjectDataBuffer, 0, m_ObjectCount * sizeof(ObjectData))
+            .build();
 
-    VkDescriptorSetAllocateInfo descriptorSetAI{};
-    descriptorSetAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAI.descriptorPool = m_DescriptorPool;
-    descriptorSetAI.descriptorSetCount = static_cast<uint32_t>(descriptorSetLayouts.size());
-    descriptorSetAI.pSetLayouts = descriptorSetLayouts.data();
-
-    VK_CHECK(vkAllocateDescriptorSets(m_Device, &descriptorSetAI, m_MainDescriptors.data()));
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-    {
-        VkDescriptorImageInfo descriptorII_Box{};
-        descriptorII_Box.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        descriptorII_Box.imageView = m_BoxTexture.imageView;
-        descriptorII_Box.sampler = m_BoxTexture.imageSampler.value();
-
-        VkDescriptorImageInfo descriptorII_Face{};
-        descriptorII_Face.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        descriptorII_Face.imageView = m_FaceTexture.imageView;
-        descriptorII_Face.sampler = m_FaceTexture.imageSampler.value();
-
-        VkDescriptorBufferInfo descriptorBI{};
-        descriptorBI.buffer = m_ObjectDataBuffer[i].buffer;
-        descriptorBI.offset = 0;
-        descriptorBI.range = m_ObjectCount * sizeof(ObjectData);
-
-        VkDescriptorBufferInfo descriptor2BI{};
-        descriptor2BI.buffer = m_LightDataBuffer[i].buffer;
-        descriptor2BI.offset = 0;
-        descriptor2BI.range = m_MaxLights * sizeof(LightData) + sizeof(int);
-
-        std::vector<VkWriteDescriptorSet> descriptorWrite{};
-        descriptorWrite.push_back(
-            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                  .dstSet = m_MainDescriptors[i],
-                                  .dstBinding = 0,
-                                  .dstArrayElement = 0,
-                                  .descriptorCount = 1,
-                                  .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                  .pImageInfo = &descriptorII_Box,
-                                  .pBufferInfo = nullptr,
-                                  .pTexelBufferView = nullptr });
-        descriptorWrite.push_back(
-            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                  .dstSet = m_MainDescriptors[i],
-                                  .dstBinding = 1,
-                                  .dstArrayElement = 0,
-                                  .descriptorCount = 1,
-                                  .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                  .pImageInfo = &descriptorII_Face,
-                                  .pBufferInfo = nullptr,
-                                  .pTexelBufferView = nullptr });
-        descriptorWrite.push_back(
-            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                  .dstSet = m_MainDescriptors[i],
-                                  .dstBinding = 2,
-                                  .dstArrayElement = 0,
-                                  .descriptorCount = 1,
-                                  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                  .pImageInfo = nullptr,
-                                  .pBufferInfo = &descriptorBI,
-                                  .pTexelBufferView = nullptr });
-        descriptorWrite.push_back(
-            VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                  .dstSet = m_MainDescriptors[i],
-                                  .dstBinding = 3,
-                                  .dstArrayElement = 0,
-                                  .descriptorCount = 1,
-                                  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                  .pImageInfo = nullptr,
-                                  .pBufferInfo = &descriptor2BI,
-                                  .pTexelBufferView = nullptr });
-
-        vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrite.size()),
-                               descriptorWrite.data(), 0, nullptr);
-    }
+    m_LightDescriptors =
+        DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
+                                    m_LightDescriptorLayout)
+            .addStorageBuffers(0, m_LightDataBuffer, 0,
+                               m_MaxLights * sizeof(LightData) + sizeof(LightGeneralData))
+            .build();
 }
 
 void Engine::createMesh()
@@ -685,9 +602,12 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     scissor.extent.width = m_DrawImage.imageExtent.width;
     scissor.extent.height = m_DrawImage.imageExtent.height;
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BasicPipeline.pipelineLayout, 0,
-                            1, &m_MainDescriptors[m_CurrentFrame % 2], 0, nullptr);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipeline);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 0, 1,
+                            &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 1, 1,
+                            &m_ObjectDescriptors[m_CurrentFrame % 2], 0, nullptr);
 
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
@@ -700,21 +620,22 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     pushConstantData.cameraPos = m_Camera.getPosition();
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
 
-    vkCmdPushConstants(cmd, m_BasicPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+    vkCmdPushConstants(cmd, m_MeshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                        sizeof(VertexPushConstant), &pushConstantData);
 
     vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_ObjectCount, 0, 0, 0);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipeline.pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipeline.pipelineLayout, 0,
-                            1, &m_MainDescriptors[m_CurrentFrame % 2], 0, nullptr);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipeline);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipelineLayout, 0, 1,
+                            &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
 
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-    vkCmdPushConstants(cmd, m_LightPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+    vkCmdPushConstants(cmd, m_LightPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                        sizeof(VertexPushConstant), &pushConstantData);
 
     vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_LightCount, 0, 0, 0);

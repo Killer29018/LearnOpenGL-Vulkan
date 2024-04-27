@@ -3,50 +3,60 @@
 #include <vulkan/vulkan.h>
 
 #include <filesystem>
+#include <initializer_list>
 #include <optional>
+#include <span>
 #include <vector>
 
-struct Pipeline {
-    VkPipeline pipeline;
-    VkPipelineLayout pipelineLayout;
+class PipelineLayoutBuilder
+{
+  public:
+    static VkPipelineLayout build(VkDevice device,
+                                  std::initializer_list<VkPushConstantRange> pushConstants,
+                                  std::initializer_list<VkDescriptorSetLayout> descriptorLayouts);
+    static VkPipelineLayout build(VkDevice device, std::span<VkPushConstantRange> pushConstants,
+                                  std::span<VkDescriptorSetLayout> descriptorLayouts);
 };
 
 class PipelineBuilder
 {
   public:
-    static void reset();
+    static PipelineBuilder start(VkDevice device, VkPipelineLayout layout);
 
-    static void addPushConstant(VkPushConstantRange pushConstant);
-    static void addDescriptorLayout(VkDescriptorSetLayout descriptorLayout);
+    PipelineBuilder& setShaders(VkShaderModule vertShaderModule, VkShaderModule fragShaderModule);
 
-    static void setShaders(VkShaderModule vertShaderModule, VkShaderModule fragShaderModule);
-    static void inputAssembly(VkPrimitiveTopology topology);
-    static void rasterizer(VkPolygonMode mode, VkCullModeFlags cullMode, VkFrontFace frontFace);
-    static void setMultisampleNone();
+    PipelineBuilder& inputAssembly(VkPrimitiveTopology topology);
+    PipelineBuilder& rasterizer(VkPolygonMode mode, VkCullModeFlags cullMode,
+                                VkFrontFace frontFace);
+    PipelineBuilder& setMultisampleNone();
 
-    static void disableBlending();
+    PipelineBuilder& disableBlending();
 
-    static void setColourAttachmentFormat(VkFormat format);
-    static void setDepthFormat(VkFormat format);
+    PipelineBuilder& setColourAttachmentFormat(VkFormat format);
+    PipelineBuilder& setDepthFormat(VkFormat format);
 
-    static void disableDepthTest();
-    static void enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp);
+    PipelineBuilder& disableDepthTest();
+    PipelineBuilder& enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp);
 
-    static Pipeline build(VkDevice device);
+    VkPipeline build();
 
     static std::optional<VkShaderModule> createShaderModule(VkDevice device,
                                                             std::filesystem::path filePath);
 
   private:
-    static std::vector<VkPushConstantRange> s_PushConstants;
-    static std::vector<VkDescriptorSetLayout> s_DescriptorLayouts;
-    static std::vector<VkPipelineShaderStageCreateInfo> s_ShaderStages;
+    PipelineBuilder(VkDevice device, VkPipelineLayout layout);
 
-    static VkFormat s_ColourAttachmentFormat;
-    static VkPipelineInputAssemblyStateCreateInfo s_InputAssemblyCI;
-    static VkPipelineRasterizationStateCreateInfo s_RasterizerCI;
-    static VkPipelineColorBlendAttachmentState s_ColourBlendAS;
-    static VkPipelineMultisampleStateCreateInfo s_MultisampleCI;
-    static VkPipelineDepthStencilStateCreateInfo s_DepthStencilCI;
-    static VkPipelineRenderingCreateInfo s_RenderCI;
+  private:
+    VkDevice m_Device;
+    VkPipelineLayout m_PipelineLayout;
+
+    std::vector<VkPipelineShaderStageCreateInfo> m_ShaderStages;
+
+    VkFormat m_ColourAttachmentFormat;
+    VkPipelineInputAssemblyStateCreateInfo m_InputAssemblyCI;
+    VkPipelineRasterizationStateCreateInfo m_RasterizerCI;
+    VkPipelineColorBlendAttachmentState m_ColourBlendAS;
+    VkPipelineMultisampleStateCreateInfo m_MultisampleCI;
+    VkPipelineDepthStencilStateCreateInfo m_DepthStencilCI;
+    VkPipelineRenderingCreateInfo m_RenderCI;
 };

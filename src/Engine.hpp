@@ -126,8 +126,12 @@ class Engine : public EventObserver
     AllocatedImage m_FaceTexture;
 
     VkDescriptorPool m_DescriptorPool;
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> m_MainDescriptors;
-    VkDescriptorSetLayout m_MainDescriptorLayout;
+
+    VkDescriptorSetLayout m_ObjectDescriptorLayout;
+    std::vector<VkDescriptorSet> m_ObjectDescriptors;
+
+    VkDescriptorSetLayout m_LightDescriptorLayout;
+    std::vector<VkDescriptorSet> m_LightDescriptors;
 
     size_t m_ObjectCount;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_ObjectDataBuffer;
@@ -137,8 +141,11 @@ class Engine : public EventObserver
     float m_LightTime = 0.0f;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_LightDataBuffer;
 
-    Pipeline m_BasicPipeline;
-    Pipeline m_LightPipeline;
+    VkPipelineLayout m_MeshPipelineLayout;
+    VkPipeline m_MeshPipeline;
+
+    VkPipelineLayout m_LightPipelineLayout;
+    VkPipeline m_LightPipeline;
 
     Mesh m_BasicMesh;
 

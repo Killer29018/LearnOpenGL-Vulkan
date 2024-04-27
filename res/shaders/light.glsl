@@ -5,7 +5,7 @@ struct LightData
     mat4 model;
 };
 
-layout (std430, binding=3) buffer readonly Lights
+layout (std430, set=0, binding=0) buffer readonly Lights
 {
     int lightCount;
     vec4 ambient;

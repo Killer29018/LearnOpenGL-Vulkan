@@ -8,150 +8,176 @@
 #include <iostream>
 #include <vector>
 
-std::vector<VkPushConstantRange> PipelineBuilder::s_PushConstants;
-std::vector<VkDescriptorSetLayout> PipelineBuilder::s_DescriptorLayouts;
-std::vector<VkPipelineShaderStageCreateInfo> PipelineBuilder::s_ShaderStages;
-
-VkFormat PipelineBuilder::s_ColourAttachmentFormat;
-VkPipelineInputAssemblyStateCreateInfo PipelineBuilder::s_InputAssemblyCI;
-VkPipelineRasterizationStateCreateInfo PipelineBuilder::s_RasterizerCI;
-VkPipelineColorBlendAttachmentState PipelineBuilder::s_ColourBlendAS;
-VkPipelineMultisampleStateCreateInfo PipelineBuilder::s_MultisampleCI;
-VkPipelineDepthStencilStateCreateInfo PipelineBuilder::s_DepthStencilCI;
-VkPipelineRenderingCreateInfo PipelineBuilder::s_RenderCI;
-
-void PipelineBuilder::reset()
+VkPipelineLayout
+PipelineLayoutBuilder::build(VkDevice device,
+                             std::initializer_list<VkPushConstantRange> pushConstants,
+                             std::initializer_list<VkDescriptorSetLayout> descriptorLayouts)
 {
-    s_PushConstants.clear();
-    s_DescriptorLayouts.clear();
-    s_ShaderStages.clear();
+    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
+    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCI.setLayoutCount = static_cast<uint32_t>(descriptorLayouts.size());
+    pipelineLayoutCI.pSetLayouts = std::data(descriptorLayouts);
+    pipelineLayoutCI.pushConstantRangeCount = static_cast<uint32_t>(pushConstants.size());
+    pipelineLayoutCI.pPushConstantRanges = std::data(pushConstants);
 
-    s_ColourAttachmentFormat = {};
-    s_InputAssemblyCI = {};
-    s_RasterizerCI = {};
-    s_ColourBlendAS = {};
-    s_MultisampleCI = {};
-    s_DepthStencilCI = {};
-    s_RenderCI = {};
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &layout));
+
+    return layout;
 }
 
-void PipelineBuilder::addPushConstant(VkPushConstantRange pushConstant)
+VkPipelineLayout PipelineLayoutBuilder ::build(VkDevice device,
+                                               std::span<VkPushConstantRange> pushConstants,
+                                               std::span<VkDescriptorSetLayout> descriptorLayouts)
 {
-    s_PushConstants.push_back(pushConstant);
+    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
+    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCI.setLayoutCount = static_cast<uint32_t>(descriptorLayouts.size());
+    pipelineLayoutCI.pSetLayouts = descriptorLayouts.data();
+    pipelineLayoutCI.pushConstantRangeCount = static_cast<uint32_t>(pushConstants.size());
+    pipelineLayoutCI.pPushConstantRanges = pushConstants.data();
+
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &layout));
+
+    return layout;
 }
 
-void PipelineBuilder::addDescriptorLayout(VkDescriptorSetLayout descriptorLayout)
+PipelineBuilder PipelineBuilder::start(VkDevice device, VkPipelineLayout layout)
 {
-    s_DescriptorLayouts.push_back(descriptorLayout);
+    PipelineBuilder builder(device, layout);
+    return builder;
 }
 
-void PipelineBuilder::setShaders(VkShaderModule vertShaderModule, VkShaderModule fragShaderModule)
+PipelineBuilder& PipelineBuilder::setShaders(VkShaderModule vertShaderModule,
+                                             VkShaderModule fragShaderModule)
 {
-    s_ShaderStages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+    m_ShaderStages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                                .pNext = nullptr,
                                .flags = 0,
                                .stage = VK_SHADER_STAGE_VERTEX_BIT,
                                .module = vertShaderModule,
                                .pName = "main" });
-    s_ShaderStages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+    m_ShaderStages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                                .pNext = nullptr,
                                .flags = 0,
                                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
                                .module = fragShaderModule,
                                .pName = "main" });
+
+    return *this;
 }
 
-void PipelineBuilder::inputAssembly(VkPrimitiveTopology topology)
+PipelineBuilder& PipelineBuilder::inputAssembly(VkPrimitiveTopology topology)
 {
-    s_InputAssemblyCI.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    s_InputAssemblyCI.pNext = nullptr;
-    s_InputAssemblyCI.flags = 0;
-    s_InputAssemblyCI.topology = topology;
-    s_InputAssemblyCI.primitiveRestartEnable = VK_FALSE;
+    m_InputAssemblyCI.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    m_InputAssemblyCI.pNext = nullptr;
+    m_InputAssemblyCI.flags = 0;
+    m_InputAssemblyCI.topology = topology;
+    m_InputAssemblyCI.primitiveRestartEnable = VK_FALSE;
+
+    return *this;
 }
 
-void PipelineBuilder::rasterizer(VkPolygonMode mode, VkCullModeFlags cullMode,
-                                 VkFrontFace frontFace)
+PipelineBuilder& PipelineBuilder::rasterizer(VkPolygonMode mode, VkCullModeFlags cullMode,
+                                             VkFrontFace frontFace)
 {
-    s_RasterizerCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    s_RasterizerCI.pNext = nullptr;
-    s_RasterizerCI.flags = 0;
-    s_RasterizerCI.depthClampEnable = VK_FALSE;
-    s_RasterizerCI.rasterizerDiscardEnable = VK_FALSE;
-    s_RasterizerCI.polygonMode = mode;
-    s_RasterizerCI.cullMode = cullMode;
-    s_RasterizerCI.frontFace = frontFace;
-    s_RasterizerCI.depthBiasEnable = VK_FALSE;
-    s_RasterizerCI.depthBiasConstantFactor = 0.0f;
-    s_RasterizerCI.depthBiasClamp = 0.0f;
-    s_RasterizerCI.depthBiasSlopeFactor = 0.0f;
-    s_RasterizerCI.lineWidth = 1.0f;
+    m_RasterizerCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    m_RasterizerCI.pNext = nullptr;
+    m_RasterizerCI.flags = 0;
+    m_RasterizerCI.depthClampEnable = VK_FALSE;
+    m_RasterizerCI.rasterizerDiscardEnable = VK_FALSE;
+    m_RasterizerCI.polygonMode = mode;
+    m_RasterizerCI.cullMode = cullMode;
+    m_RasterizerCI.frontFace = frontFace;
+    m_RasterizerCI.depthBiasEnable = VK_FALSE;
+    m_RasterizerCI.depthBiasConstantFactor = 0.0f;
+    m_RasterizerCI.depthBiasClamp = 0.0f;
+    m_RasterizerCI.depthBiasSlopeFactor = 0.0f;
+    m_RasterizerCI.lineWidth = 1.0f;
+
+    return *this;
 }
 
-void PipelineBuilder::setMultisampleNone()
+PipelineBuilder& PipelineBuilder::setMultisampleNone()
 {
-    s_MultisampleCI.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    s_MultisampleCI.pNext = nullptr;
-    s_MultisampleCI.flags = 0;
-    s_MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    s_MultisampleCI.sampleShadingEnable = VK_FALSE;
-    s_MultisampleCI.minSampleShading = 1.0f;
-    s_MultisampleCI.pSampleMask = nullptr;
-    s_MultisampleCI.alphaToCoverageEnable = VK_FALSE;
-    s_MultisampleCI.alphaToOneEnable = VK_FALSE;
+    m_MultisampleCI.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    m_MultisampleCI.pNext = nullptr;
+    m_MultisampleCI.flags = 0;
+    m_MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    m_MultisampleCI.sampleShadingEnable = VK_FALSE;
+    m_MultisampleCI.minSampleShading = 1.0f;
+    m_MultisampleCI.pSampleMask = nullptr;
+    m_MultisampleCI.alphaToCoverageEnable = VK_FALSE;
+    m_MultisampleCI.alphaToOneEnable = VK_FALSE;
+
+    return *this;
 }
 
-void PipelineBuilder::disableBlending()
+PipelineBuilder& PipelineBuilder::disableBlending()
 {
-    s_ColourBlendAS.blendEnable = VK_FALSE;
-    s_ColourBlendAS.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+    m_ColourBlendAS.blendEnable = VK_FALSE;
+    m_ColourBlendAS.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    return *this;
 }
 
-void PipelineBuilder::setColourAttachmentFormat(VkFormat format)
+PipelineBuilder& PipelineBuilder::setColourAttachmentFormat(VkFormat format)
 {
-    s_ColourAttachmentFormat = format;
+    m_ColourAttachmentFormat = format;
 
-    s_RenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    s_RenderCI.pNext = nullptr;
-    s_RenderCI.colorAttachmentCount = 1;
-    s_RenderCI.pColorAttachmentFormats = &s_ColourAttachmentFormat;
+    m_RenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    m_RenderCI.pNext = nullptr;
+    m_RenderCI.colorAttachmentCount = 1;
+    m_RenderCI.pColorAttachmentFormats = &m_ColourAttachmentFormat;
+
+    return *this;
 }
 
-void PipelineBuilder::setDepthFormat(VkFormat format) { s_RenderCI.depthAttachmentFormat = format; }
-
-void PipelineBuilder::disableDepthTest()
+PipelineBuilder& PipelineBuilder::setDepthFormat(VkFormat format)
 {
-    s_DepthStencilCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    s_DepthStencilCI.pNext = nullptr;
-    s_DepthStencilCI.flags = 0;
-    s_DepthStencilCI.depthTestEnable = VK_FALSE;
-    s_DepthStencilCI.depthWriteEnable = VK_FALSE;
-    s_DepthStencilCI.depthCompareOp = VK_COMPARE_OP_NEVER;
-    s_DepthStencilCI.depthBoundsTestEnable = VK_FALSE;
-    s_DepthStencilCI.stencilTestEnable = VK_FALSE;
-    s_DepthStencilCI.front = {};
-    s_DepthStencilCI.back = {};
-    s_DepthStencilCI.minDepthBounds = 0.0f;
-    s_DepthStencilCI.maxDepthBounds = 1.0f;
-}
-void PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp)
-{
-    s_DepthStencilCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    s_DepthStencilCI.pNext = nullptr;
-    s_DepthStencilCI.flags = 0;
-    s_DepthStencilCI.depthTestEnable = VK_TRUE;
-    s_DepthStencilCI.depthWriteEnable = depthWriteEnable;
-    s_DepthStencilCI.depthCompareOp = compareOp;
-    s_DepthStencilCI.depthBoundsTestEnable = VK_FALSE;
-    s_DepthStencilCI.stencilTestEnable = VK_FALSE;
-    s_DepthStencilCI.front = {};
-    s_DepthStencilCI.back = {};
-    s_DepthStencilCI.minDepthBounds = 0.0f;
-    s_DepthStencilCI.maxDepthBounds = 1.0f;
+    m_RenderCI.depthAttachmentFormat = format;
+
+    return *this;
 }
 
-Pipeline PipelineBuilder::build(VkDevice device)
+PipelineBuilder& PipelineBuilder::disableDepthTest()
+{
+    m_DepthStencilCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    m_DepthStencilCI.pNext = nullptr;
+    m_DepthStencilCI.flags = 0;
+    m_DepthStencilCI.depthTestEnable = VK_FALSE;
+    m_DepthStencilCI.depthWriteEnable = VK_FALSE;
+    m_DepthStencilCI.depthCompareOp = VK_COMPARE_OP_NEVER;
+    m_DepthStencilCI.depthBoundsTestEnable = VK_FALSE;
+    m_DepthStencilCI.stencilTestEnable = VK_FALSE;
+    m_DepthStencilCI.front = {};
+    m_DepthStencilCI.back = {};
+    m_DepthStencilCI.minDepthBounds = 0.0f;
+    m_DepthStencilCI.maxDepthBounds = 1.0f;
+
+    return *this;
+}
+PipelineBuilder& PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp)
+{
+    m_DepthStencilCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    m_DepthStencilCI.pNext = nullptr;
+    m_DepthStencilCI.flags = 0;
+    m_DepthStencilCI.depthTestEnable = VK_TRUE;
+    m_DepthStencilCI.depthWriteEnable = depthWriteEnable;
+    m_DepthStencilCI.depthCompareOp = compareOp;
+    m_DepthStencilCI.depthBoundsTestEnable = VK_FALSE;
+    m_DepthStencilCI.stencilTestEnable = VK_FALSE;
+    m_DepthStencilCI.front = {};
+    m_DepthStencilCI.back = {};
+    m_DepthStencilCI.minDepthBounds = 0.0f;
+    m_DepthStencilCI.maxDepthBounds = 1.0f;
+
+    return *this;
+}
+
+VkPipeline PipelineBuilder::build()
 {
     VkPipelineViewportStateCreateInfo viewportStateCI{};
     viewportStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -168,7 +194,7 @@ Pipeline PipelineBuilder::build(VkDevice device)
     colourBlendingCI.logicOpEnable = VK_FALSE;
     colourBlendingCI.logicOp = VK_LOGIC_OP_COPY;
     colourBlendingCI.attachmentCount = 1;
-    colourBlendingCI.pAttachments = &s_ColourBlendAS;
+    colourBlendingCI.pAttachments = &m_ColourBlendAS;
 
     VkPipelineVertexInputStateCreateInfo vertexInputStateCI{};
     vertexInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -192,36 +218,27 @@ Pipeline PipelineBuilder::build(VkDevice device)
     tessellationStateCI.flags = 0;
     tessellationStateCI.patchControlPoints = 0;
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
-    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCI.setLayoutCount = static_cast<uint32_t>(s_DescriptorLayouts.size());
-    pipelineLayoutCI.pSetLayouts = s_DescriptorLayouts.data();
-    pipelineLayoutCI.pushConstantRangeCount = static_cast<uint32_t>(s_PushConstants.size());
-    pipelineLayoutCI.pPushConstantRanges = s_PushConstants.data();
-
-    Pipeline pipeline;
-    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipeline.pipelineLayout));
-
     VkGraphicsPipelineCreateInfo graphicsPipelineCI{};
     graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    graphicsPipelineCI.pNext = &s_RenderCI;
-    graphicsPipelineCI.stageCount = static_cast<uint32_t>(s_ShaderStages.size());
-    graphicsPipelineCI.pStages = s_ShaderStages.data();
+    graphicsPipelineCI.pNext = &m_RenderCI;
+    graphicsPipelineCI.stageCount = static_cast<uint32_t>(m_ShaderStages.size());
+    graphicsPipelineCI.pStages = m_ShaderStages.data();
     graphicsPipelineCI.pVertexInputState = &vertexInputStateCI;
-    graphicsPipelineCI.pInputAssemblyState = &s_InputAssemblyCI;
+    graphicsPipelineCI.pInputAssemblyState = &m_InputAssemblyCI;
     graphicsPipelineCI.pViewportState = &viewportStateCI;
-    graphicsPipelineCI.pRasterizationState = &s_RasterizerCI;
-    graphicsPipelineCI.pMultisampleState = &s_MultisampleCI;
+    graphicsPipelineCI.pRasterizationState = &m_RasterizerCI;
+    graphicsPipelineCI.pMultisampleState = &m_MultisampleCI;
     graphicsPipelineCI.pColorBlendState = &colourBlendingCI;
-    graphicsPipelineCI.pDepthStencilState = &s_DepthStencilCI;
+    graphicsPipelineCI.pDepthStencilState = &m_DepthStencilCI;
     graphicsPipelineCI.pDynamicState = &dynamicStateCI;
-    graphicsPipelineCI.layout = pipeline.pipelineLayout;
+    graphicsPipelineCI.layout = m_PipelineLayout;
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &graphicsPipelineCI, nullptr,
-                                  &pipeline.pipeline) != VK_SUCCESS)
+    VkPipeline pipeline;
+    if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &graphicsPipelineCI, nullptr,
+                                  &pipeline) != VK_SUCCESS)
     {
         std::cerr << "Failed to create pipeline\n";
-        pipeline.pipeline = VK_NULL_HANDLE;
+        pipeline = VK_NULL_HANDLE;
     }
 
     return pipeline;
@@ -259,4 +276,11 @@ std::optional<VkShaderModule> PipelineBuilder::createShaderModule(VkDevice devic
         return {};
     }
     return module;
+}
+
+PipelineBuilder::PipelineBuilder(VkDevice device, VkPipelineLayout layout)
+    : m_Device{ device }, m_PipelineLayout{ layout }, m_ShaderStages{}, m_ColourAttachmentFormat{},
+      m_InputAssemblyCI{}, m_RasterizerCI{}, m_ColourBlendAS{}, m_MultisampleCI{},
+      m_DepthStencilCI{}, m_RenderCI{}
+{
 }
