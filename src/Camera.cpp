@@ -28,8 +28,8 @@ void Camera::update(double dt)
     if (m_PressedKeys[GLFW_KEY_A]) m_Direction += m_Right;
     if (m_PressedKeys[GLFW_KEY_S]) m_Direction += -m_Front;
     if (m_PressedKeys[GLFW_KEY_D]) m_Direction += -m_Right;
-    if (m_PressedKeys[GLFW_KEY_SPACE]) m_Direction += m_Up;
-    if (m_PressedKeys[GLFW_KEY_LEFT_CONTROL]) m_Direction += -m_Up;
+    if (m_PressedKeys[GLFW_KEY_SPACE]) m_Direction += m_WorldUp;
+    if (m_PressedKeys[GLFW_KEY_LEFT_CONTROL]) m_Direction += -m_WorldUp;
     if (m_PressedKeys[GLFW_KEY_LEFT_SHIFT]) speed *= m_MovementSpeedMult;
 
     if (glm::length(m_Direction) != 0) m_Direction = glm::normalize(m_Direction);
@@ -58,7 +58,7 @@ void Camera::receiveEvent(const Event* event)
 
             const float mouseSensitivity = 0.1f;
             m_Yaw += mmEvent->xOffset * mouseSensitivity;
-            m_Pitch += mmEvent->yOffset * mouseSensitivity;
+            m_Pitch -= mmEvent->yOffset * mouseSensitivity;
 
             m_Pitch = std::clamp(m_Pitch, -89.0f, 89.0f);
 
@@ -75,8 +75,10 @@ glm::mat4 Camera::getView() { return glm::lookAt(m_Position, m_Position + m_Fron
 
 glm::mat4 Camera::getPerspective(glm::ivec2 windowSize)
 {
-    return glm::perspective(glm::radians(m_vFOV), (float)windowSize.x / (float)windowSize.y, 0.01f,
-                            1000.0f);
+    glm::mat4 proj = glm::perspective(glm::radians(m_vFOV),
+                                      (float)windowSize.x / (float)windowSize.y, 0.01f, 1000.0f);
+    proj[1][1] *= -1;
+    return proj;
 }
 
 void Camera::updateVectors()

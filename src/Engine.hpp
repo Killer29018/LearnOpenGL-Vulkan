@@ -40,8 +40,10 @@ struct LightGeneralData {
 struct LightData {
     alignas(16) glm::vec3 position;
     alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 viewProj;
     alignas(16) glm::vec3 diffuse;
     alignas(16) glm::vec3 specular;
+    alignas(16) glm::vec3 attenuation;
 };
 
 struct MaterialData {
@@ -57,10 +59,15 @@ struct Vertex {
 };
 
 struct VertexPushConstant {
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-    alignas(16) glm::vec3 cameraPos;
-    alignas(16) VkDeviceAddress vertexBuffer;
+    alignas(8) glm::mat4 view;
+    alignas(8) glm::mat4 proj;
+    alignas(8) glm::vec3 cameraPos;
+    alignas(8) VkDeviceAddress vertexBuffer;
+};
+
+struct ShadowPushConstant {
+    alignas(8) VkDeviceAddress vertexBuffer;
+    alignas(8) int currentLight;
 };
 
 class Engine : public EventObserver
@@ -102,6 +109,7 @@ class Engine : public EventObserver
 
     FrameData& getCurrentFrame();
 
+    void renderShadow(VkCommandBuffer& cmd);
     void renderGeometry(VkCommandBuffer& cmd);
 
     void update();
@@ -148,12 +156,15 @@ class Engine : public EventObserver
     size_t m_ObjectCount;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_ObjectDataBuffer;
 
-    const size_t m_MaxLights = 10;
+    static constexpr size_t m_MaxLights = 10;
     size_t m_LightCount = 0;
     float m_LightTime = 0.0f;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_LightDataBuffer;
+    AllocatedImage m_ShadowMaps;
 
-    const size_t m_MaxMaterials = 10;
+    glm::mat4 cameraView, cameraProj;
+
+    static constexpr size_t m_MaxMaterials = 10;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_MaterialDataBuffer;
 
     VkPipelineLayout m_MeshPipelineLayout;
@@ -161,6 +172,9 @@ class Engine : public EventObserver
 
     VkPipelineLayout m_LightPipelineLayout;
     VkPipeline m_LightPipeline;
+
+    VkPipelineLayout m_ShadowMapPipelineLayout;
+    VkPipeline m_ShadowMapPipeline;
 
     Mesh m_BasicMesh;
 

@@ -1,0 +1,16 @@
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_virtio.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_dzn.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_virtio.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_dzn.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_virtio.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_dzn.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_virtio.so. Skipping this driver.
+[WARNING: General]
+terminator_CreateInstance: Received return code -3 from call to vkCreateInstance in ICD /nix/store/5xylmnrx48vqlcfv1daj63kql91gflx3-mesa-24.0.3-drivers/lib/libvulkan_dzn.so. Skipping this driver.

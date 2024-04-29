@@ -283,4 +283,6 @@ PipelineBuilder::PipelineBuilder(VkDevice device, VkPipelineLayout layout)
       m_InputAssemblyCI{}, m_RasterizerCI{}, m_ColourBlendAS{}, m_MultisampleCI{},
       m_DepthStencilCI{}, m_RenderCI{}
 {
+    m_RenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    m_RenderCI.pNext = nullptr;
 }

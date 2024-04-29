@@ -17,6 +17,7 @@ class DescriptorLayoutBuilder
                                         VkShaderStageFlags shaderStages);
 
     DescriptorLayoutBuilder& addStorageBuffer(uint32_t binding, VkShaderStageFlags shaderStages);
+    DescriptorLayoutBuilder& addStorageImage(uint32_t binding, VkShaderStageFlags shaderStages);
     DescriptorLayoutBuilder& addCombinedImageSampler(uint32_t binding,
                                                      VkShaderStageFlags shaderStages);
 
@@ -43,6 +44,13 @@ class DescriptorSetBuilder
                                                 VkDescriptorBufferInfo* bufferInfo);
     DescriptorSetBuilder& addCombinedImageSampler(uint32_t binding, VkImageLayout imageLayout,
                                                   VkImageView imageView, VkSampler sampler);
+
+    DescriptorSetBuilder& addImageArraySampler(uint32_t binding, VkImageLayout imageLayout,
+                                               VkImageView imageView, VkSampler sampler);
+
+    DescriptorSetBuilder& addStorageImage(uint32_t binding, VkImageLayout imageLayout,
+                                          VkImageView imageView);
+
     DescriptorSetBuilder& addStorageBuffer(uint32_t binding, VkBuffer buffer, uint32_t offset,
                                            size_t range);
 

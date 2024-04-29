@@ -32,6 +32,15 @@ DescriptorLayoutBuilder& DescriptorLayoutBuilder::addStorageBuffer(uint32_t bind
 
     return *this;
 }
+
+DescriptorLayoutBuilder& DescriptorLayoutBuilder::addStorageImage(uint32_t binding,
+                                                                  VkShaderStageFlags shaderStages)
+{
+    addBinding(binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, shaderStages);
+
+    return *this;
+}
+
 DescriptorLayoutBuilder&
 DescriptorLayoutBuilder::addCombinedImageSampler(uint32_t binding, VkShaderStageFlags shaderStages)
 {
@@ -103,6 +112,29 @@ DescriptorSetBuilder& DescriptorSetBuilder::addCombinedImageSampler(uint32_t bin
                               .dstArrayElement = 0,
                               .descriptorCount = 1,
                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                              .pImageInfo = (VkDescriptorImageInfo*)m_ImageInfos.size(),
+                              .pBufferInfo = nullptr,
+                              .pTexelBufferView = nullptr });
+
+    return *this;
+}
+
+DescriptorSetBuilder& DescriptorSetBuilder::addStorageImage(uint32_t binding,
+                                                            VkImageLayout imageLayout,
+                                                            VkImageView imageView)
+{
+    m_ImageInfos.push_back(VkDescriptorImageInfo{
+        .sampler = 0,
+        .imageView = imageView,
+        .imageLayout = imageLayout,
+    });
+
+    m_DescriptorWrites[-1].push_back(
+        VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                              .dstBinding = binding,
+                              .dstArrayElement = 0,
+                              .descriptorCount = 1,
+                              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                               .pImageInfo = (VkDescriptorImageInfo*)m_ImageInfos.size(),
                               .pBufferInfo = nullptr,
                               .pTexelBufferView = nullptr });

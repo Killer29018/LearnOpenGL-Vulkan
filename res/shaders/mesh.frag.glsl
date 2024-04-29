@@ -16,10 +16,50 @@ layout (location = 0) out vec4 f_Colour;
 layout(set=1, binding = 0) uniform sampler2D u_BoxSampler;
 layout(set=1, binding = 1) uniform sampler2D u_FaceSampler;
 
+vec3 gammaCorrect(vec3 colour)
+{
+    return pow(colour, vec3(1./2.2));
+}
+
+vec4 invGamma(vec4 colour)
+{
+    return vec4(pow(colour.rgb, vec3(2.2)), colour.a);
+}
+
+vec3 v;
+
+bool inShadow(vec4 position, int layer, vec3 normal, vec3 lightDir)
+{
+    vec3 projected = position.xyz / position.w; // [-1,1]
+    projected = projected * 0.5 + 0.5; // [0,1]
+
+    // v = vec3(projected);
+
+    // if (projected.x < 0.0 || projected.y < 0.0 || projected.x > 1.0 || projected.y > 1.0)
+    //     return false;
+
+    ivec3 size = imageSize(u_ShadowMaps);
+
+    float closest = imageLoad(u_ShadowMaps, ivec3(projected.xy * size.xy, layer)).r;
+
+    if (closest < 0.0001)
+        return false;
+
+    float current = projected.z;
+
+    // float bias = 0.05;
+    float bias = max(0.05 * 1.0 - dot(normal, lightDir), 0.005);
+    //
+
+    bool inShadow = ((current - bias) > closest) ? true : false;
+
+    return inShadow;
+}
+
 void main()
 {
-    vec4 box = texture(u_BoxSampler, v_UV);
-    vec4 face = texture(u_FaceSampler, v_UV);
+    vec4 box = invGamma(texture(u_BoxSampler, v_UV));
+    vec4 face = invGamma(texture(u_FaceSampler, v_UV));
 
     MaterialData material = u_Materials.materials[v_MaterialIndex];
 
@@ -35,23 +75,42 @@ void main()
         LightData light = u_Lights.lights[i];
         vec3 lightPos = light.position;
 
+        vec4 fragPos_light = light.viewProj * vec4(v_FragPos, 1.0);
+
+        float distance = length(lightPos - v_FragPos);
+        float attenuation = 1.0 / (light.attenuation.x + light.attenuation.y * distance + light.attenuation.z * distance * distance);
+
         vec3 lightDir = normalize(lightPos - v_FragPos);
+        vec3 viewDir = normalize(v_CameraPos - v_FragPos);
+        vec3 halfwayDir = normalize(lightDir + viewDir);
 
         float diff = max(dot(norm, lightDir), 0.0);
-        diffuse += light.diffuse * diff;
 
-        vec3 viewDir = normalize(v_CameraPos - v_FragPos);
+        bool shadow = inShadow(fragPos_light, i, norm, lightDir);
+
+        if (!shadow)
+        {
+            diffuse += light.diffuse * diff;
+            diffuse *= attenuation;
+        }
+
         vec3 reflectDir = reflect(-lightDir, norm);
-        float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.specular.a);
-        specular += light.specular * spec;
+        float spec = pow(max(dot(viewDir, halfwayDir), 0.0), material.specular.a);
+
+        if (!shadow)
+        {
+            specular += light.specular * spec;
+            specular *= attenuation;
+        }
     }
 
     colour += ambient * material.ambient;
     colour += diffuse * material.diffuse;
     colour += specular * material.specular.rgb;
 
-    colour = mix(box, face, 0.5).rgb * colour;
+    if (v_MaterialIndex == 0)
+        colour *= mix(box, face, 0.5).rgb;
 
     // f_Colour = mix(box, face, 0.5);
-    f_Colour = vec4(colour, 1.0);
+    f_Colour = vec4(gammaCorrect(colour), 1.0);
 }
