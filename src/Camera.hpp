@@ -1,6 +1,7 @@
 #pragma once
 
 #define GLM_ENABLE_EXPERIMENTAL
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 #define GLFW_INCLUDE_NONE
@@ -45,7 +46,7 @@ class Camera : public EventObserver
     float m_MovementSpeed = 0.01f;
     float m_MovementSpeedMult = 0.1f;
 
-    float m_vFOV = 70.0f;
+    float m_vFOV = 90.0f;
 
     float m_Pitch;
     float m_Yaw;

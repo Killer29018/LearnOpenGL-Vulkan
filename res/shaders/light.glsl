@@ -7,7 +7,6 @@ struct LightData
     vec3 attenuation;
     mat4 proj;
     mat4 view[6];
-    vec2 planes;
 };
 
 layout (std430, set=0, binding=0) buffer readonly Lights

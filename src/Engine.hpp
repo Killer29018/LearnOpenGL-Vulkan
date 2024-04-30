@@ -45,7 +45,6 @@ struct LightData {
     alignas(16) glm::vec3 attenuation;
     alignas(16) glm::mat4 proj;
     alignas(16) glm::mat4 view[6];
-    alignas(16) glm::vec2 planes;
 };
 
 struct MaterialData {
@@ -163,8 +162,6 @@ class Engine : public EventObserver
     float m_LightTime = 0.0f;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_LightDataBuffer;
     AllocatedImage m_ShadowMaps;
-
-    glm::mat4 cameraView, cameraProj;
 
     static constexpr size_t m_MaxMaterials = 10;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_MaterialDataBuffer;

@@ -52,7 +52,7 @@ bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
         float bias = max(0.05 * 1.0 - dot(normal, lightDir), 0.005);
         // bias = 0.0005;
 
-        bool inShadow = ((current - bias) > closest) ? true : false;
+        bool inShadow = ((current + bias) < closest) ? true : false;
 
 
         return inShadow;

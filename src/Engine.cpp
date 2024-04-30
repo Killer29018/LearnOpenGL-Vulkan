@@ -372,7 +372,7 @@ void Engine::initPipelines()
                              .disableBlending()
                              .setColourAttachmentFormat(m_DrawImage.imageFormat)
                              .setDepthFormat(m_DepthImage.imageFormat)
-                             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS)
+                             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
                              .build();
 
         vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
@@ -397,7 +397,8 @@ void Engine::initPipelines()
                               .disableBlending()
                               .setColourAttachmentFormat(m_DrawImage.imageFormat)
                               .setDepthFormat(m_DepthImage.imageFormat)
-                              .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS)
+                              // .disableDepthTest()
+                              .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
                               .build();
 
         vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
@@ -579,11 +580,10 @@ void Engine::uploadLightData()
         const float near = 0.1f;
         const float far = 40.0f;
 
-        proj = glm::perspective(glm::radians(90.0f), aspect, near, far);
+        proj = glm::perspective(glm::radians(90.0f), aspect, far, near);
         proj[1][1] *= -1;
 
         lights[i].proj = proj;
-        lights[i].planes = { near, far };
         const std::pair<glm::vec3, glm::vec3> viewDir[6] = {
             {{ 1.0f, 0.0f, 0.0f },   { 0.0f, -1.0f, 0.0f }},
             { { -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }},
@@ -598,8 +598,6 @@ void Engine::uploadLightData()
                 lights[i].position, lights[i].position + viewDir[j].first, viewDir[j].second);
         }
     }
-    cameraProj = lights[0].proj;
-    cameraView = lights[0].view[5];
 
     size_t size = lights.size() * sizeof(LightData) + sizeof(LightGeneralData);
 
@@ -767,7 +765,7 @@ FrameData& Engine::getCurrentFrame() { return m_Frames[m_CurrentFrame % MAX_FRAM
 void Engine::renderShadow(VkCommandBuffer& cmd)
 {
     VkClearColorValue clearColour = {
-        {1.0f, 0.0f, 0.0f, 0.0f}
+        {0.0f, 0.0f, 0.0f, 0.0f}
     };
     VkImageSubresourceRange range = {};
     range.baseMipLevel = 0;
@@ -858,7 +856,7 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     depthAI.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAI.clearValue.depthStencil.depth = 1.0f;
+    depthAI.clearValue.depthStencil.depth = -1.0f;
 
     VkRenderingInfo renderInfo{};
     renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
