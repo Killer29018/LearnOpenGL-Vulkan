@@ -24,6 +24,8 @@ class PipelineBuilder
     static PipelineBuilder start(VkDevice device, VkPipelineLayout layout);
 
     PipelineBuilder& setShaders(VkShaderModule vertShaderModule, VkShaderModule fragShaderModule);
+    PipelineBuilder& setShaders(VkShaderModule vertShaderModule, VkShaderModule geoShaderModule,
+                                VkShaderModule fragShaderModule);
 
     PipelineBuilder& inputAssembly(VkPrimitiveTopology topology);
     PipelineBuilder& rasterizer(VkPolygonMode mode, VkCullModeFlags cullMode,

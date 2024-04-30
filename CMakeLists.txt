@@ -32,6 +32,8 @@ elseif(CMAKE_BUILD_TYPE MATCHES Release)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
 endif()
 
+add_compile_definitions(GLFW_FORCE_DEPTH_ZERO_TO_ONE)
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${outputDirectory})
 
 # Setup build flags
@@ -74,6 +76,17 @@ foreach(file ${RESOURCES_VERTEX})
     TARGET Resources
     POST_BUILD
     COMMAND glslc -fshader-stage=vert -o ${InputRes}/shaders/${name}.spv
+            ${InputRes}/shaders/${name}.glsl
+    COMMENT "Compiled ${name}")
+endforeach()
+
+file(GLOB RESOURCES_GEOMETRY ${InputRes}/shaders/*.geo.glsl)
+foreach(file ${RESOURCES_GEOMETRY})
+  get_filename_component(name ${file} NAME_WLE)
+  add_custom_command(
+    TARGET Resources
+    POST_BUILD
+    COMMAND glslc -fshader-stage=geom -o ${InputRes}/shaders/${name}.spv
             ${InputRes}/shaders/${name}.glsl
     COMMENT "Compiled ${name}")
 endforeach()

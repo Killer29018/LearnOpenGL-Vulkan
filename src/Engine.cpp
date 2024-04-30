@@ -150,6 +150,7 @@ void Engine::initVulkan()
     features.robustBufferAccess = true;
     features.fragmentStoresAndAtomics = true;
     features.imageCubeArray = true;
+    features.geometryShader = true;
 
     vkb::PhysicalDeviceSelector selector{ vkbInst };
     auto vkbMaybeDevice = selector.set_minimum_version(1, 3)
@@ -272,8 +273,6 @@ void Engine::initSwapchain()
         imageViewCI.subresourceRange.layerCount = layers;
 
         VK_CHECK(vkCreateImageView(m_Device, &imageViewCI, nullptr, &m_ShadowMaps.imageView));
-
-        // m_ShadowMaps.createSampler(m_Device, VK_FILTER_NEAREST);
     }
 }
 
@@ -332,7 +331,8 @@ void Engine::initDescriptorSetLayouts()
 
     m_LightDescriptorLayout =
         DescriptorLayoutBuilder::start(m_Device)
-            .addStorageBuffer(0, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+            .addStorageBuffer(0, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT |
+                                     VK_SHADER_STAGE_FRAGMENT_BIT)
             .addStorageImage(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
             .build();
 
@@ -412,11 +412,14 @@ void Engine::initPipelines()
 
         std::optional<VkShaderModule> vertShaderModule =
             PipelineBuilder::createShaderModule(m_Device, "res/shaders/shadow.vert.spv");
+        std::optional<VkShaderModule> geoShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/shadow.geo.spv");
         std::optional<VkShaderModule> fragShaderModule =
             PipelineBuilder::createShaderModule(m_Device, "res/shaders/shadow.frag.spv");
 
         m_ShadowMapPipeline = PipelineBuilder::start(m_Device, m_ShadowMapPipelineLayout)
-                                  .setShaders(vertShaderModule.value(), fragShaderModule.value())
+                                  .setShaders(vertShaderModule.value(), geoShaderModule.value(),
+                                              fragShaderModule.value())
                                   .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
                                   .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_FRONT_BIT,
                                               VK_FRONT_FACE_COUNTER_CLOCKWISE)
@@ -426,6 +429,7 @@ void Engine::initPipelines()
                                   .build();
 
         vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, geoShaderModule.value(), nullptr);
         vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
     }
 }
@@ -543,10 +547,10 @@ void Engine::uploadLightData()
         glm::vec3(fabs(cos(time) + sin(time)), fabs(cos(time)), fabs(sin(time)));
 
     std::vector<LightData> lights = {
-        { .position = glm::vec3(0.1f, -6.0f, 0.0f),
-         .diffuse = glm::vec3(0.8f, 0.0f, 0.0f),
+        { .position = glm::vec3(0.1f, -4.0f, 0.0f),
+         .diffuse = glm::vec3(0.9f, 0.3f, 0.3f),
          .specular = glm::vec3(0.5f),
-         .attenuation = glm::vec3(0.5f, 0.8f, 0.0f) },
+         .attenuation = glm::vec3(0.5f, 0.3f, 0.0f) },
         { .position = movingLightPosition,
          .diffuse = glm::vec3(movingLightColour * 0.6f),
          .specular = glm::vec3(0.3f),
@@ -573,13 +577,12 @@ void Engine::uploadLightData()
         view = glm::lookAt(lights[i].position, glm::vec3(0.0f, 0.0f, 0.0f),
                            glm::vec3(0.0f, -1.0f, 0.0f));
 
-        glm::mat4 proj{ 1.0f };
-        // proj = glm::ortho(-20.0f, 20.0f, 20.0f, -20.0f, 0.1f, 12.0f);
         float aspect =
             (float)m_ShadowMaps.imageExtent.width / (float)m_ShadowMaps.imageExtent.height;
         const float near = 0.1f;
         const float far = 40.0f;
 
+        glm::mat4 proj{ 1.0f };
         proj = glm::perspective(glm::radians(90.0f), aspect, far, near);
         proj[1][1] *= -1;
 
@@ -592,12 +595,16 @@ void Engine::uploadLightData()
             { { 0.0f, 0.0f, 1.0f },  { 0.0f, -1.0f, 0.0f }},
             { { 0.0f, 0.0f, -1.0f }, { 0.0f, -1.0f, 0.0f }},
         };
+
         for (int j = 0; j < 6; j++)
         {
             lights[i].view[j] = glm::lookAt(
                 lights[i].position, lights[i].position + viewDir[j].first, viewDir[j].second);
         }
     }
+
+    m_CameraView = lights[0].view[2];
+    m_CameraProjection = lights[0].proj;
 
     size_t size = lights.size() * sizeof(LightData) + sizeof(LightGeneralData);
 
@@ -821,15 +828,11 @@ void Engine::renderShadow(VkCommandBuffer& cmd)
         shadowPushConstant.currentLight = {};
         shadowPushConstant.currentLight.x = (int)i;
 
-        for (size_t k = 0; k < 6; k++)
+        vkCmdPushConstants(cmd, m_ShadowMapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(ShadowPushConstant), &shadowPushConstant);
+        for (size_t j = 0; j < m_ObjectCount; j++)
         {
-            shadowPushConstant.currentLight.y = k;
-            vkCmdPushConstants(cmd, m_ShadowMapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                               sizeof(ShadowPushConstant), &shadowPushConstant);
-            for (size_t j = 0; j < m_ObjectCount; j++)
-            {
-                vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, j);
-            }
+            vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, j);
         }
     }
 
@@ -890,6 +893,9 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
 
     pushConstantData.view = m_Camera.getView();
     pushConstantData.proj = m_Camera.getPerspective(m_Window->getSize());
+    //
+    // pushConstantData.view = m_CameraView;
+    // pushConstantData.proj = m_CameraProjection;
 
     pushConstantData.cameraPos = m_Camera.getPosition();
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;

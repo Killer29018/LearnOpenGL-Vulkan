@@ -36,7 +36,7 @@ bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
         vec4 position = light.proj * light.view[i] * vec4(v_FragPos.xyzw);
 
         vec3 projected = position.xyz / position.w; // [-1,1]
-                                                    //
+
         if (projected.z > 1.0 || projected.z < 0.0)
             continue;
 
@@ -46,11 +46,9 @@ bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
         if (projected.x < 0.0 || projected.y < 0.0 || projected.x > 1.0 || projected.y > 1.0)
             continue;
 
-
         float closest = imageLoad(u_ShadowMaps, ivec3(projected.xy * size.xy, layer * 6 + i)).r;
 
-        float bias = max(0.05 * 1.0 - dot(normal, lightDir), 0.005);
-        // bias = 0.0005;
+        float bias = max(0.005 * 1.0 - dot(normal, lightDir), 0.0005);
 
         bool inShadow = ((current + bias) < closest) ? true : false;
 
@@ -115,8 +113,5 @@ void main()
     if (v_MaterialIndex == 0)
         colour *= mix(box, face, 0.5).rgb;
 
-    // colour = v;
-
-    // f_Colour = mix(box, face, 0.5);
     f_Colour = vec4(gammaCorrect(colour), 1.0);
 }

@@ -76,7 +76,7 @@ glm::mat4 Camera::getView() { return glm::lookAt(m_Position, m_Position + m_Fron
 glm::mat4 Camera::getPerspective(glm::ivec2 windowSize)
 {
     const float near = 0.01f;
-    const float far = 40.0f;
+    const float far = 1000.0f;
     glm::mat4 proj = glm::perspective(glm::radians(m_vFOV),
                                       (float)windowSize.x / (float)windowSize.y, far, near);
     proj[1][1] *= -1;

@@ -178,6 +178,7 @@ class Engine : public EventObserver
     Mesh m_BasicMesh;
 
     Camera m_Camera;
+    glm::mat4 m_CameraView, m_CameraProjection;
 
     size_t m_CurrentFrame = 0;
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> m_Frames;

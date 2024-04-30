@@ -68,6 +68,21 @@ PipelineBuilder& PipelineBuilder::setShaders(VkShaderModule vertShaderModule,
     return *this;
 }
 
+PipelineBuilder& PipelineBuilder::setShaders(VkShaderModule vertShaderModule,
+                                             VkShaderModule geoShaderModule,
+                                             VkShaderModule fragShaderModule)
+{
+    setShaders(vertShaderModule, fragShaderModule);
+    m_ShaderStages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                               .pNext = nullptr,
+                               .flags = 0,
+                               .stage = VK_SHADER_STAGE_GEOMETRY_BIT,
+                               .module = geoShaderModule,
+                               .pName = "main" });
+
+    return *this;
+}
+
 PipelineBuilder& PipelineBuilder::inputAssembly(VkPrimitiveTopology topology)
 {
     m_InputAssemblyCI.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
