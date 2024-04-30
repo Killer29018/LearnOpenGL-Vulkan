@@ -40,10 +40,12 @@ struct LightGeneralData {
 struct LightData {
     alignas(16) glm::vec3 position;
     alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 viewProj;
     alignas(16) glm::vec3 diffuse;
     alignas(16) glm::vec3 specular;
     alignas(16) glm::vec3 attenuation;
+    alignas(16) glm::mat4 proj;
+    alignas(16) glm::mat4 view[6];
+    alignas(16) glm::vec2 planes;
 };
 
 struct MaterialData {
@@ -67,7 +69,7 @@ struct VertexPushConstant {
 
 struct ShadowPushConstant {
     alignas(8) VkDeviceAddress vertexBuffer;
-    alignas(8) int currentLight;
+    alignas(8) glm::ivec2 currentLight;
 };
 
 class Engine : public EventObserver

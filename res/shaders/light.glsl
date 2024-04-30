@@ -2,10 +2,12 @@ struct LightData
 {
     vec3 position;
     mat4 model;
-    mat4 viewProj;
     vec3 diffuse;
     vec3 specular;
     vec3 attenuation;
+    mat4 proj;
+    mat4 view[6];
+    vec2 planes;
 };
 
 layout (std430, set=0, binding=0) buffer readonly Lights
@@ -15,4 +17,4 @@ layout (std430, set=0, binding=0) buffer readonly Lights
     LightData lights[];
 } u_Lights;
 
-layout (r32f, set=0, binding=1) uniform image2DArray u_ShadowMaps;
+layout (r32f, set=0, binding=1) uniform imageCubeArray u_ShadowMaps;

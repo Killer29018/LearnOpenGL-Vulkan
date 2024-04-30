@@ -4,10 +4,11 @@
 #include "light.glsl"
 
 layout (location = 0) in flat int v_CurrentLight;
+layout (location = 1) in flat int v_ViewIndex;
 
 void main()
 {
-    ivec3 position = ivec3(gl_FragCoord.xy, v_CurrentLight);
+    ivec3 position = ivec3(gl_FragCoord.xy, v_CurrentLight * 6 + v_ViewIndex);
     float v = imageLoad(u_ShadowMaps, position).r;
 
     if (gl_FragCoord.z < v)

@@ -149,6 +149,7 @@ void Engine::initVulkan()
     VkPhysicalDeviceFeatures features{};
     features.robustBufferAccess = true;
     features.fragmentStoresAndAtomics = true;
+    features.imageCubeArray = true;
 
     vkb::PhysicalDeviceSelector selector{ vkbInst };
     auto vkbMaybeDevice = selector.set_minimum_version(1, 3)
@@ -225,7 +226,7 @@ void Engine::initSwapchain()
 
     m_DrawImage.create(m_Device, m_Allocator,
                        { (uint32_t)m_Window->getSize().x, (uint32_t)m_Window->getSize().y, 1 },
-                       VK_FORMAT_R16G16B16A16_UNORM,
+                       VK_FORMAT_R16G16B16A16_SFLOAT,
                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
@@ -234,14 +235,14 @@ void Engine::initSwapchain()
                         VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 
     {
-        uint32_t layers = m_MaxLights;
+        uint32_t layers = m_MaxLights * 6;
         m_ShadowMaps.imageFormat = VK_FORMAT_R32_SFLOAT;
         m_ShadowMaps.imageExtent = { 1600, 1600, 1 };
 
         VkImageCreateInfo imageCI{};
         imageCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageCI.pNext = nullptr;
-        imageCI.flags = 0;
+        imageCI.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         imageCI.imageType = VK_IMAGE_TYPE_2D;
         imageCI.extent = m_ShadowMaps.imageExtent;
         imageCI.arrayLayers = layers;
@@ -261,7 +262,7 @@ void Engine::initSwapchain()
         VkImageViewCreateInfo imageViewCI{};
         imageViewCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         imageViewCI.pNext = nullptr;
-        imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
         imageViewCI.image = m_ShadowMaps.image;
         imageViewCI.format = m_ShadowMaps.imageFormat;
         imageViewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -541,18 +542,18 @@ void Engine::uploadLightData()
         glm::vec3(fabs(cos(time) + sin(time)), fabs(cos(time)), fabs(sin(time)));
 
     std::vector<LightData> lights = {
-        { .position = glm::vec3(0.1f, -6.0f, 0.0f),
-         .diffuse = glm::vec3(0.8f, 0.0f, 0.0f),
-         .specular = glm::vec3(0.5f),
-         .attenuation = glm::vec3(0.5f, 0.8f, 0.0f) },
-        { .position = movingLightPosition,
-         .diffuse = glm::vec3(movingLightColour * 0.6f),
-         .specular = glm::vec3(0.3f),
-         .attenuation = glm::vec3(0.5f, 0.08f, 0.0f) },
-        { .position{ 0.5f, 3.0f, 5.0f },
+  // { .position = glm::vec3(0.1f, -6.0f, 0.0f),
+  //  .diffuse = glm::vec3(0.8f, 0.0f, 0.0f),
+  //  .specular = glm::vec3(0.5f),
+  //  .attenuation = glm::vec3(0.5f, 0.8f, 0.0f) },
+  // {.position = movingLightPosition,
+  //  .diffuse = glm::vec3(movingLightColour * 0.6f),
+  //  .specular = glm::vec3(0.3f),
+  //  .attenuation = glm::vec3(0.5f, 0.08f, 0.0f)},
+        {.position{ 0.5f, 3.0f, 5.0f },
          .diffuse{ 0.0f, 0.8f, 0.8f },
          .specular{ 0.5f },
-         .attenuation{ 0.0f, 1.0f, 0.0f } }
+         .attenuation{ 0.0f, 1.0f, 0.0f }}
     };
     m_LightCount = lights.size();
 
@@ -573,14 +574,32 @@ void Engine::uploadLightData()
 
         glm::mat4 proj{ 1.0f };
         // proj = glm::ortho(-20.0f, 20.0f, 20.0f, -20.0f, 0.1f, 12.0f);
-        proj = glm::perspective(glm::radians(70.0f), 1.0f, 0.06f, 40.0f);
-        proj[1][1] *= -1;
-        //
-        cameraProj = proj;
-        cameraView = view;
+        float aspect =
+            (float)m_ShadowMaps.imageExtent.width / (float)m_ShadowMaps.imageExtent.height;
+        const float near = 1.0f;
+        const float far = 40.0f;
 
-        lights[i].viewProj = proj * view;
+        proj = glm::perspective(glm::radians(90.0f), aspect, near, far);
+        // proj[1][1] *= -1;
+
+        lights[i].proj = proj;
+        lights[i].planes = { near, far };
+        const std::pair<glm::vec3, glm::vec3> viewDir[6] = {
+            {{ 1.0f, 0.0f, 0.0f },   { 0.0f, -1.0f, 0.0f }},
+            { { -1.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }},
+            { { 0.0f, 1.0f, 0.0f },  { 0.0f, 0.0f, -1.0f }},
+            { { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+            { { 0.0f, 0.0f, 1.0f },  { 0.0f, -1.0f, 0.0f }},
+            { { 0.0f, 0.0f, -1.0f }, { 0.0f, -1.0f, 0.0f }},
+        };
+        for (int j = 0; j < 6; j++)
+        {
+            lights[i].view[j] = glm::lookAt(
+                lights[i].position, lights[i].position + viewDir[j].first, viewDir[j].second);
+        }
     }
+    cameraProj = lights[0].proj;
+    cameraView = lights[0].view[5];
 
     size_t size = lights.size() * sizeof(LightData) + sizeof(LightGeneralData);
 
@@ -790,14 +809,18 @@ void Engine::renderShadow(VkCommandBuffer& cmd)
     {
         ShadowPushConstant shadowPushConstant{};
         shadowPushConstant.vertexBuffer = m_BasicMesh.vertexBufferAddress;
-        shadowPushConstant.currentLight = (int)i;
+        shadowPushConstant.currentLight = {};
+        shadowPushConstant.currentLight.x = (int)i;
 
-        vkCmdPushConstants(cmd, m_ShadowMapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(ShadowPushConstant), &shadowPushConstant);
-
-        for (size_t i = 0; i < m_ObjectCount; i++)
+        for (size_t k = 0; k < 6; k++)
         {
-            vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, i);
+            shadowPushConstant.currentLight.y = k;
+            vkCmdPushConstants(cmd, m_ShadowMapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               sizeof(ShadowPushConstant), &shadowPushConstant);
+            for (size_t j = 0; j < m_ObjectCount; j++)
+            {
+                vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, j);
+            }
         }
     }
 
@@ -859,8 +882,8 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     pushConstantData.view = m_Camera.getView();
     pushConstantData.proj = m_Camera.getPerspective(m_Window->getSize());
 
-    // pushConstantData.view = cameraView;
-    // pushConstantData.proj = cameraProj;
+    pushConstantData.view = cameraView;
+    pushConstantData.proj = cameraProj;
 
     pushConstantData.cameraPos = m_Camera.getPosition();
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
@@ -972,7 +995,7 @@ void Engine::render()
     range.baseMipLevel = 0;
     range.levelCount = 1;
     range.baseArrayLayer = 0;
-    range.layerCount = m_MaxLights;
+    range.layerCount = m_MaxLights * 6;
     range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     vkCmdClearColorImage(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_GENERAL, &clearColour, 1, &range);
 
