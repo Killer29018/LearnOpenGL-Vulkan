@@ -8,8 +8,8 @@ layout (triangle_strip, max_vertices=18) out;
 
 layout (location = 0) in flat int v_CurrentLight[3];
 
-layout (location = 0) out flat int g_Layer;
-layout (location = 1) out vec4 g_FragPos;
+// layout (location = 0) out flat int g_Layer;
+// layout (location = 1) out vec4 g_FragPos;
 
 void main()
 {
@@ -17,12 +17,12 @@ void main()
 
     for (int face = 0; face < 6; face++)
     {
-        // gl_Layer = face;
-        g_Layer = v_CurrentLight[0] * 6 + face;
+        gl_Layer = v_CurrentLight[0] * 6 + face;
+        // gl_Layer = g_Layer;
         for (int i = 0; i < 3; i++)
         {
-            g_FragPos = light.proj * light.view[face] * gl_in[i].gl_Position;
-            gl_Position = g_FragPos;
+            gl_Position = light.proj * light.view[face] * gl_in[i].gl_Position;
+            // gl_Position = g_FragPos;
             EmitVertex();
         }
         EndPrimitive();

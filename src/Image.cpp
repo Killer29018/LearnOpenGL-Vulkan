@@ -135,6 +135,12 @@ void AllocatedImage::transition(VkCommandBuffer cmd, VkImage image, VkImageLayou
     VkImageAspectFlags aspectMask = (newLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
                                         ? VK_IMAGE_ASPECT_DEPTH_BIT
                                         : VK_IMAGE_ASPECT_COLOR_BIT;
+    transition(cmd, image, currentLayout, newLayout, aspectMask);
+}
+
+void AllocatedImage::transition(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout,
+                                VkImageLayout newLayout, VkImageAspectFlags aspectMask)
+{
     VkImageMemoryBarrier2 imageBarrier{};
     imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     imageBarrier.pNext = nullptr;

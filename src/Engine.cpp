@@ -107,6 +107,7 @@ void Engine::cleanup()
     m_DrawImage.destroy(m_Device, m_Allocator);
     m_DepthImage.destroy(m_Device, m_Allocator);
     m_ShadowMaps.destroy(m_Device, m_Allocator);
+    // m_ShadowDepth.destroy(m_Device, m_Allocator);
 
     destroySwapchain();
 
@@ -237,13 +238,13 @@ void Engine::initSwapchain()
 
     {
         uint32_t layers = m_MaxLights * 6;
-        m_ShadowMaps.imageFormat = VK_FORMAT_R32_SFLOAT;
+        m_ShadowMaps.imageFormat = VK_FORMAT_D32_SFLOAT;
         m_ShadowMaps.imageExtent = { 1600, 1600, 1 };
 
         VkImageCreateInfo imageCI{};
         imageCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageCI.pNext = nullptr;
-        imageCI.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        imageCI.flags = 0;
         imageCI.imageType = VK_IMAGE_TYPE_2D;
         imageCI.extent = m_ShadowMaps.imageExtent;
         imageCI.arrayLayers = layers;
@@ -251,7 +252,8 @@ void Engine::initSwapchain()
         imageCI.samples = VK_SAMPLE_COUNT_1_BIT;
         imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageCI.format = m_ShadowMaps.imageFormat;
-        imageCI.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        imageCI.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
         VmaAllocationCreateInfo allocateCI{};
         allocateCI.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -263,16 +265,18 @@ void Engine::initSwapchain()
         VkImageViewCreateInfo imageViewCI{};
         imageViewCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         imageViewCI.pNext = nullptr;
-        imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+        imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
         imageViewCI.image = m_ShadowMaps.image;
         imageViewCI.format = m_ShadowMaps.imageFormat;
-        imageViewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        imageViewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         imageViewCI.subresourceRange.baseMipLevel = 0;
         imageViewCI.subresourceRange.levelCount = imageCI.mipLevels;
         imageViewCI.subresourceRange.baseArrayLayer = 0;
         imageViewCI.subresourceRange.layerCount = layers;
 
         VK_CHECK(vkCreateImageView(m_Device, &imageViewCI, nullptr, &m_ShadowMaps.imageView));
+
+        m_ShadowMaps.createSampler(m_Device, VK_FILTER_LINEAR);
     }
 }
 
@@ -333,7 +337,7 @@ void Engine::initDescriptorSetLayouts()
         DescriptorLayoutBuilder::start(m_Device)
             .addStorageBuffer(0, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT |
                                      VK_SHADER_STAGE_FRAGMENT_BIT)
-            .addStorageImage(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+            .addCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
             .build();
 
     m_MaterialDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
@@ -425,7 +429,8 @@ void Engine::initPipelines()
                                               VK_FRONT_FACE_COUNTER_CLOCKWISE)
                                   .setMultisampleNone()
                                   .disableBlending()
-                                  .disableDepthTest()
+                                  .setDepthFormat(m_ShadowMaps.imageFormat)
+                                  .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
                                   .build();
 
         vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
@@ -629,9 +634,8 @@ void Engine::initDescriptorPool()
 {
     std::vector<VkDescriptorPoolSize> poolSizes = {
         {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         .descriptorCount = MAX_FRAMES_IN_FLIGHT * 2                                                   },
+         .descriptorCount = MAX_FRAMES_IN_FLIGHT * 3                                                   },
         { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        .descriptorCount = MAX_FRAMES_IN_FLIGHT * 3},
-        { .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         .descriptorCount = MAX_FRAMES_IN_FLIGHT    }
     };
 
     const uint32_t maxSets = MAX_FRAMES_IN_FLIGHT * 3;
@@ -662,7 +666,8 @@ void Engine::initDescriptorSets()
                                     m_LightDescriptorLayout)
             .addStorageBuffers(0, m_LightDataBuffer, 0,
                                m_MaxLights * sizeof(LightData) + sizeof(LightGeneralData))
-            .addStorageImage(1, VK_IMAGE_LAYOUT_GENERAL, m_ShadowMaps.imageView)
+            .addCombinedImageSampler(1, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                                     m_ShadowMaps.imageView, m_ShadowMaps.imageSampler.value())
             .build();
 
     m_MaterialDescriptors =
@@ -771,16 +776,14 @@ FrameData& Engine::getCurrentFrame() { return m_Frames[m_CurrentFrame % MAX_FRAM
 
 void Engine::renderShadow(VkCommandBuffer& cmd)
 {
-    VkClearColorValue clearColour = {
-        {0.0f, 0.0f, 0.0f, 0.0f}
-    };
-    VkImageSubresourceRange range = {};
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = m_MaxLights * 6;
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    vkCmdClearColorImage(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_GENERAL, &clearColour, 1, &range);
+    VkRenderingAttachmentInfo depthAI{};
+    depthAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAI.pNext = nullptr;
+    depthAI.imageView = m_ShadowMaps.imageView;
+    depthAI.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAI.clearValue.depthStencil.depth = 0.0f;
 
     VkRenderingInfo renderInfo{};
     renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -788,10 +791,10 @@ void Engine::renderShadow(VkCommandBuffer& cmd)
     renderInfo.flags = 0;
     renderInfo.renderArea =
         VkRect2D({ 0, 0 }, { m_ShadowMaps.imageExtent.width, m_ShadowMaps.imageExtent.height });
-    renderInfo.layerCount = 1;
+    renderInfo.layerCount = m_MaxLights * 6;
     renderInfo.colorAttachmentCount = 0;
     renderInfo.pColorAttachments = nullptr;
-    renderInfo.pDepthAttachment = nullptr;
+    renderInfo.pDepthAttachment = &depthAI;
     renderInfo.pStencilAttachment = nullptr;
 
     vkCmdBeginRendering(cmd, &renderInfo);
@@ -830,10 +833,8 @@ void Engine::renderShadow(VkCommandBuffer& cmd)
 
         vkCmdPushConstants(cmd, m_ShadowMapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(ShadowPushConstant), &shadowPushConstant);
-        for (size_t j = 0; j < m_ObjectCount; j++)
-        {
-            vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, 1, 0, 0, j);
-        }
+
+        vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_ObjectCount, 0, 0, 0);
     }
 
     vkCmdEndRendering(cmd);
@@ -999,8 +1000,11 @@ void Engine::render()
                                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     AllocatedImage::transition(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_UNDEFINED,
-                               VK_IMAGE_LAYOUT_GENERAL);
+                               VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     renderShadow(cmd);
+
+    AllocatedImage::transition(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                               VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
 
     renderGeometry(cmd);
 

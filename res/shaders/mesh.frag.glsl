@@ -30,7 +30,7 @@ vec4 v;
 
 bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
 {
-    ivec3 size = imageSize(u_ShadowMaps);
+    // ivec3 size = imageSize(u_ShadowMaps);
     for (int i = 0; i < 6; i++)
     {
         vec4 position = light.proj * light.view[i] * vec4(v_FragPos.xyzw);
@@ -46,7 +46,8 @@ bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
         if (projected.x < 0.0 || projected.y < 0.0 || projected.x > 1.0 || projected.y > 1.0)
             continue;
 
-        float closest = imageLoad(u_ShadowMaps, ivec3(projected.xy * size.xy, layer * 6 + i)).r;
+        float closest = texture(u_ShadowMaps, vec3(projected.xy, layer * 6 + i)).r;
+        // float closest = imageLoad(u_ShadowMaps, ivec3(projected.xy * size.xy, layer * 6 + i)).r;
 
         float bias = max(0.005 * 1.0 - dot(normal, lightDir), 0.0005);
 

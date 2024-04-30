@@ -32,6 +32,9 @@ class AllocatedImage
     static void transition(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout,
                            VkImageLayout newLayout);
 
+    static void transition(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout,
+                           VkImageLayout newLayout, VkImageAspectFlags aspect);
+
     static void copyImgToImg(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize,
                              VkExtent2D dstSize);
 };
