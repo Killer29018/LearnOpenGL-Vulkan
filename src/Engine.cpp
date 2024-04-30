@@ -542,18 +542,18 @@ void Engine::uploadLightData()
         glm::vec3(fabs(cos(time) + sin(time)), fabs(cos(time)), fabs(sin(time)));
 
     std::vector<LightData> lights = {
-  // { .position = glm::vec3(0.1f, -6.0f, 0.0f),
-  //  .diffuse = glm::vec3(0.8f, 0.0f, 0.0f),
-  //  .specular = glm::vec3(0.5f),
-  //  .attenuation = glm::vec3(0.5f, 0.8f, 0.0f) },
-  // {.position = movingLightPosition,
-  //  .diffuse = glm::vec3(movingLightColour * 0.6f),
-  //  .specular = glm::vec3(0.3f),
-  //  .attenuation = glm::vec3(0.5f, 0.08f, 0.0f)},
-        {.position{ 0.5f, 3.0f, 5.0f },
+        { .position = glm::vec3(0.1f, -6.0f, 0.0f),
+         .diffuse = glm::vec3(0.8f, 0.0f, 0.0f),
+         .specular = glm::vec3(0.5f),
+         .attenuation = glm::vec3(0.5f, 0.8f, 0.0f) },
+        { .position = movingLightPosition,
+         .diffuse = glm::vec3(movingLightColour * 0.6f),
+         .specular = glm::vec3(0.3f),
+         .attenuation = glm::vec3(0.5f, 0.08f, 0.0f) },
+        { .position{ 0.5f, 3.0f, 5.0f },
          .diffuse{ 0.0f, 0.8f, 0.8f },
          .specular{ 0.5f },
-         .attenuation{ 0.0f, 1.0f, 0.0f }}
+         .attenuation{ 0.0f, 1.0f, 0.0f } }
     };
     m_LightCount = lights.size();
 
@@ -576,11 +576,11 @@ void Engine::uploadLightData()
         // proj = glm::ortho(-20.0f, 20.0f, 20.0f, -20.0f, 0.1f, 12.0f);
         float aspect =
             (float)m_ShadowMaps.imageExtent.width / (float)m_ShadowMaps.imageExtent.height;
-        const float near = 1.0f;
+        const float near = 0.1f;
         const float far = 40.0f;
 
         proj = glm::perspective(glm::radians(90.0f), aspect, near, far);
-        // proj[1][1] *= -1;
+        proj[1][1] *= -1;
 
         lights[i].proj = proj;
         lights[i].planes = { near, far };
@@ -766,6 +766,17 @@ FrameData& Engine::getCurrentFrame() { return m_Frames[m_CurrentFrame % MAX_FRAM
 
 void Engine::renderShadow(VkCommandBuffer& cmd)
 {
+    VkClearColorValue clearColour = {
+        {1.0f, 0.0f, 0.0f, 0.0f}
+    };
+    VkImageSubresourceRange range = {};
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = m_MaxLights * 6;
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vkCmdClearColorImage(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_GENERAL, &clearColour, 1, &range);
+
     VkRenderingInfo renderInfo{};
     renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     renderInfo.pNext = nullptr;
@@ -882,9 +893,6 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     pushConstantData.view = m_Camera.getView();
     pushConstantData.proj = m_Camera.getPerspective(m_Window->getSize());
 
-    pushConstantData.view = cameraView;
-    pushConstantData.proj = cameraProj;
-
     pushConstantData.cameraPos = m_Camera.getPosition();
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
 
@@ -988,17 +996,6 @@ void Engine::render()
 
     AllocatedImage::transition(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_UNDEFINED,
                                VK_IMAGE_LAYOUT_GENERAL);
-    clearColour = {
-        {1.0f, 0.0f, 0.0f, 0.0f}
-    };
-    range = {};
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = m_MaxLights * 6;
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    vkCmdClearColorImage(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_GENERAL, &clearColour, 1, &range);
-
     renderShadow(cmd);
 
     renderGeometry(cmd);

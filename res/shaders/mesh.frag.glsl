@@ -36,7 +36,10 @@ bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
         vec4 position = light.proj * light.view[i] * vec4(v_FragPos.xyzw);
 
         vec3 projected = position.xyz / position.w; // [-1,1]
-        v = vec4(projected, 1.0);
+                                                    //
+        if (projected.z > 1.0 || projected.z < 0.0)
+            continue;
+
         float current = projected.z;
         projected = projected * 0.5 + 0.5; // [0,1]
 
@@ -115,6 +118,5 @@ void main()
     // colour = v;
 
     // f_Colour = mix(box, face, 0.5);
-    // f_Colour = vec4(gammaCorrect(colour), 1.0);
-    f_Colour = v;
+    f_Colour = vec4(gammaCorrect(colour), 1.0);
 }
