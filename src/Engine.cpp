@@ -113,7 +113,7 @@ void Engine::cleanup()
     m_DepthImage.destroy(m_Device, m_Allocator);
     m_ShadowMaps.destroy(m_Device, m_Allocator);
 
-    m_GBuffer.colour.destroy(m_Device, m_Allocator);
+    m_GBuffer.texData.destroy(m_Device, m_Allocator);
     m_GBuffer.normal.destroy(m_Device, m_Allocator);
     m_GBuffer.position.destroy(m_Device, m_Allocator);
 
@@ -254,10 +254,10 @@ void Engine::initSwapchain()
                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
         m_GBuffer.normal.createSampler(m_Device, VK_FILTER_NEAREST);
 
-        m_GBuffer.colour.create(m_Device, m_Allocator, windowSize, VK_FORMAT_R8G8B8A8_SRGB,
-                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
-        m_GBuffer.colour.createSampler(m_Device, VK_FILTER_NEAREST);
+        m_GBuffer.texData.create(m_Device, m_Allocator, windowSize, VK_FORMAT_R8G8B8A8_SRGB,
+                                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        m_GBuffer.texData.createSampler(m_Device, VK_FILTER_NEAREST);
     }
 
     {
@@ -360,9 +360,7 @@ void Engine::initDescriptorSetLayouts()
                                     .build();
 
     m_ObjectDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
-                                   .addCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
-                                   .addCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
-                                   .addStorageBuffer(2, VK_SHADER_STAGE_VERTEX_BIT)
+                                   .addStorageBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
                                    .build();
 
     m_LightDescriptorLayout =
@@ -374,6 +372,8 @@ void Engine::initDescriptorSetLayouts()
 
     m_MaterialDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
                                      .addStorageBuffer(0, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                     .addCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                     .addCombinedImageSampler(2, VK_SHADER_STAGE_FRAGMENT_BIT)
                                      .build();
 }
 
@@ -438,7 +438,7 @@ void Engine::initPipelines()
                 .disableBlending()
                 .addColourAttachmentFormats({ m_GBuffer.position.imageFormat,
                                               m_GBuffer.normal.imageFormat,
-                                              m_GBuffer.colour.imageFormat })
+                                              m_GBuffer.texData.imageFormat })
                 .setDepthFormat(m_DepthImage.imageFormat)
                 .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
                 .build();
@@ -466,7 +466,6 @@ void Engine::initPipelines()
                                     .disableBlending()
                                     .addColourAttachmentFormat(m_DrawImage.imageFormat)
                                     .setDepthFormat(m_DepthImage.imageFormat)
-                                    // .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
                                     .disableDepthTest()
                                     .build();
 
@@ -522,7 +521,7 @@ void Engine::createMaterials()
 
         MaterialData{ .ambient = glm::vec3(0.3f),
                      .diffuse = glm::vec3(1.0f),
-                     .specular = glm::vec4(0.5f, 0.5f, 0.5f, 64.0f) }
+                     .specular = glm::vec4(1.0f, 1.0f, 1.0f, 64.0f) }
     };
 
     size_t size = m_MaxMaterials * sizeof(MaterialData);
@@ -608,7 +607,7 @@ void Engine::createLights()
 void Engine::uploadLightData()
 {
     float time = 0.001f * m_LightTime;
-    glm::vec3 movingLightPosition = glm::vec3(10 * sin(time), 0.0f, 10 * cos(time));
+    glm::vec3 movingLightPosition = glm::vec3(7 * sin(time), 0.0f, 7 * cos(time));
     glm::vec3 movingLightColour =
         glm::vec3(fabs(cos(time) + sin(time)), fabs(cos(time)), fabs(sin(time)));
 
@@ -618,9 +617,9 @@ void Engine::uploadLightData()
          .specular = glm::vec3(0.5f),
          .attenuation = glm::vec3(0.5f, 0.3f, 0.0f) },
         { .position = movingLightPosition,
-         .diffuse = glm::vec3(movingLightColour * 0.6f),
+         .diffuse = glm::vec3(movingLightColour * 0.9f),
          .specular = glm::vec3(0.3f),
-         .attenuation = glm::vec3(0.5f, 0.08f, 0.0f) },
+         .attenuation = glm::vec3(0.1f, 0.08f, 0.0f) },
         { .position{ 0.5f, 3.0f, 5.0f },
          .diffuse{ 0.0f, 0.9f, 0.9f },
          .specular{ 0.5f },
@@ -630,7 +629,7 @@ void Engine::uploadLightData()
          .specular{ 0.5f },
          .attenuation{ 1.0f, 0.0f, 0.0f } },
         { .position{ 3.5f, 3.0f, -5.0f },
-         .diffuse{ 0.9f, 0.9f, 0.0f },
+         .diffuse{ movingLightColour * 0.6f },
          .specular{ 0.8f },
          .attenuation{ 0.8f, 0.2f, 0.0f } },
     };
@@ -734,18 +733,14 @@ void Engine::initDescriptorSets()
                                      m_GBuffer.normal.imageView,
                                      m_GBuffer.normal.imageSampler.value())
             .addCombinedImageSampler(2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     m_GBuffer.colour.imageView,
-                                     m_GBuffer.colour.imageSampler.value())
+                                     m_GBuffer.texData.imageView,
+                                     m_GBuffer.texData.imageSampler.value())
             .build();
 
     m_ObjectDescriptors =
         DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
                                     m_ObjectDescriptorLayout)
-            .addCombinedImageSampler(0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     m_BoxTexture.imageView, m_BoxTexture.imageSampler.value())
-            .addCombinedImageSampler(1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     m_FaceTexture.imageView, m_FaceTexture.imageSampler.value())
-            .addStorageBuffers(2, m_ObjectDataBuffer, 0, m_ObjectCount * sizeof(ObjectData))
+            .addStorageBuffers(0, m_ObjectDataBuffer, 0, m_ObjectCount * sizeof(ObjectData))
             .build();
 
     m_LightDescriptors =
@@ -761,6 +756,10 @@ void Engine::initDescriptorSets()
         DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
                                     m_MaterialDescriptorLayout)
             .addStorageBuffers(0, m_MaterialDataBuffer, 0, m_MaxMaterials * sizeof(MaterialData))
+            .addCombinedImageSampler(1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_BoxTexture.imageView, m_BoxTexture.imageSampler.value())
+            .addCombinedImageSampler(2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_FaceTexture.imageView, m_FaceTexture.imageSampler.value())
             .build();
 }
 
@@ -951,14 +950,14 @@ void Engine::renderDeferred(VkCommandBuffer& cmd)
         {0.0f, 0.0f, 0.0f, 0.0f}
     };
 
-    VkRenderingAttachmentInfo colourAI{};
-    colourAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colourAI.pNext = nullptr;
-    colourAI.imageView = m_GBuffer.colour.imageView;
-    colourAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    colourAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colourAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colourAI.clearValue.color = {
+    VkRenderingAttachmentInfo texAI{};
+    texAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    texAI.pNext = nullptr;
+    texAI.imageView = m_GBuffer.texData.imageView;
+    texAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    texAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    texAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    texAI.clearValue.color = {
         {0.0f, 0.0f, 0.0f, 0.0f}
     };
 
@@ -972,7 +971,7 @@ void Engine::renderDeferred(VkCommandBuffer& cmd)
     depthAI.clearValue.depthStencil.depth = -1.0f;
 
     const std::vector<VkRenderingAttachmentInfo> colourAttachments = { positionAI, normalAI,
-                                                                       colourAI };
+                                                                       texAI };
 
     VkRenderingInfo renderInfo{};
     renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -1200,7 +1199,7 @@ void Engine::render()
                                VK_IMAGE_LAYOUT_GENERAL);
     AllocatedImage::transition(cmd, m_GBuffer.normal.image, VK_IMAGE_LAYOUT_UNDEFINED,
                                VK_IMAGE_LAYOUT_GENERAL);
-    AllocatedImage::transition(cmd, m_GBuffer.colour.image, VK_IMAGE_LAYOUT_UNDEFINED,
+    AllocatedImage::transition(cmd, m_GBuffer.texData.image, VK_IMAGE_LAYOUT_UNDEFINED,
                                VK_IMAGE_LAYOUT_GENERAL);
 
     renderDeferred(cmd);
@@ -1209,7 +1208,7 @@ void Engine::render()
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     AllocatedImage::transition(cmd, m_GBuffer.normal.image, VK_IMAGE_LAYOUT_GENERAL,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    AllocatedImage::transition(cmd, m_GBuffer.colour.image, VK_IMAGE_LAYOUT_GENERAL,
+    AllocatedImage::transition(cmd, m_GBuffer.texData.image, VK_IMAGE_LAYOUT_GENERAL,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     renderGeometry(cmd);

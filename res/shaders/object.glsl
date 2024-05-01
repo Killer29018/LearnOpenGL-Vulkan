@@ -6,7 +6,7 @@ struct ObjectData
     mat4 rotation;
 };
 
-layout (std430, set=1, binding=2) buffer readonly Model
+layout (std430, set=1, binding=0) buffer readonly Model
 {
     ObjectData objects[];
 } u_Models;

@@ -74,7 +74,7 @@ struct ShadowPushConstant {
 struct gBuffer {
     AllocatedImage position;
     AllocatedImage normal;
-    AllocatedImage colour;
+    AllocatedImage texData;
 };
 
 class Engine : public EventObserver

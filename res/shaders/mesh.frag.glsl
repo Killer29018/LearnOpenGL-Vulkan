@@ -9,12 +9,9 @@ layout (location = 1) in vec2 v_Texcoords;
 
 layout (location = 0) out vec4 f_Colour;
 
-// layout(set=1, binding = 0) uniform sampler2D u_BoxSampler;
-// layout(set=1, binding = 1) uniform sampler2D u_FaceSampler;
-
 layout(set=1, binding = 0) uniform sampler2D u_Position;
 layout(set=1, binding = 1) uniform sampler2D u_Normal;
-layout(set=1, binding = 2) uniform sampler2D u_Colour;
+layout(set=1, binding = 2) uniform sampler2D u_TexData;
 
 vec3 gammaCorrect(vec3 colour)
 {
@@ -57,23 +54,21 @@ bool inShadow(LightData light, vec4 fragPos, int layer, vec3 normal, vec3 lightD
 
 void main()
 {
-    // vec4 box = invGamma(texture(u_BoxSampler, v_UV));
-    // vec4 face = invGamma(texture(u_FaceSampler, v_UV));
-
     vec4 positionSample = texture(u_Position, v_Texcoords);
     vec4 normalSample = texture(u_Normal, v_Texcoords);
-    vec4 colourSample = texture(u_Colour, v_Texcoords);
+    vec4 texSample = texture(u_TexData, v_Texcoords);
 
-    vec4 position = vec4(positionSample.xyz, 1.0);
-
-    if (positionSample.w < 0.001)
+    if (texSample.w < 1.0)
         discard;
 
+    vec4 position = positionSample;
     vec3 normal = normalSample.xyz;
-    // vec3 materialColour = colourSample.xyz;
-    int materialIndex = int(colourSample.w);
 
-    f_Colour = position;
+    vec2 uv = texSample.xy;
+    int materialIndex = int(texSample.z);
+
+    vec4 box = invGamma(texture(u_BoxSampler, uv));
+    vec4 face = invGamma(texture(u_FaceSampler, uv));
 
     MaterialData material = u_Materials.materials[materialIndex];
 
@@ -121,8 +116,8 @@ void main()
     colour += diffuse * material.diffuse;
     colour += specular * material.specular.rgb;
 
-    // if (v_MaterialIndex == 0)
-    //     colour *= mix(box, face, 0.5).rgb;
+    if (materialIndex == 0)
+        colour *= mix(box, face, 0.5).rgb;
 
     f_Colour = vec4(gammaCorrect(colour), 1.0);
 }
