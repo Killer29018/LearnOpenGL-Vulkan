@@ -71,6 +71,12 @@ struct ShadowPushConstant {
     alignas(8) glm::ivec2 currentLight;
 };
 
+struct gBuffer {
+    AllocatedImage position;
+    AllocatedImage normal;
+    AllocatedImage colour;
+};
+
 class Engine : public EventObserver
 {
   public:
@@ -111,6 +117,7 @@ class Engine : public EventObserver
     FrameData& getCurrentFrame();
 
     void renderShadow(VkCommandBuffer& cmd);
+    void renderDeferred(VkCommandBuffer& cmd);
     void renderGeometry(VkCommandBuffer& cmd);
 
     void update();
@@ -137,6 +144,7 @@ class Engine : public EventObserver
     std::vector<VkImageView> m_SwapchainImageViews;
     VkExtent2D m_SwapchainImageExtent;
 
+    gBuffer m_GBuffer;
     AllocatedImage m_DrawImage;
     AllocatedImage m_DepthImage;
 
@@ -144,6 +152,12 @@ class Engine : public EventObserver
     AllocatedImage m_FaceTexture;
 
     VkDescriptorPool m_DescriptorPool;
+
+    VkDescriptorSetLayout m_DummySetLayout;
+    VkDescriptorSet m_DummySet;
+
+    VkDescriptorSetLayout m_GBufferDescriptorLayout;
+    std::vector<VkDescriptorSet> m_GBufferDescriptor;
 
     VkDescriptorSetLayout m_ObjectDescriptorLayout;
     std::vector<VkDescriptorSet> m_ObjectDescriptors;
@@ -166,14 +180,17 @@ class Engine : public EventObserver
     static constexpr size_t m_MaxMaterials = 10;
     std::array<AllocatedBuffer, MAX_FRAMES_IN_FLIGHT> m_MaterialDataBuffer;
 
-    VkPipelineLayout m_MeshPipelineLayout;
-    VkPipeline m_MeshPipeline;
-
-    VkPipelineLayout m_LightPipelineLayout;
-    VkPipeline m_LightPipeline;
-
     VkPipelineLayout m_ShadowMapPipelineLayout;
     VkPipeline m_ShadowMapPipeline;
+
+    VkPipelineLayout m_DeferredRenderPipelineLayout;
+    VkPipeline m_DeferredRenderPipeline;
+
+    VkPipelineLayout m_SceneRenderPipelineLayout;
+    VkPipeline m_SceneRenderPipeline;
+
+    VkPipelineLayout m_LightDrawPipelineLayout;
+    VkPipeline m_LightDrawPipeline;
 
     Mesh m_BasicMesh;
 

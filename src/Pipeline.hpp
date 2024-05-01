@@ -34,7 +34,10 @@ class PipelineBuilder
 
     PipelineBuilder& disableBlending();
 
-    PipelineBuilder& setColourAttachmentFormat(VkFormat format);
+    PipelineBuilder& addColourAttachmentFormat(VkFormat format);
+    PipelineBuilder& addColourAttachmentFormats(std::initializer_list<VkFormat> formats);
+    PipelineBuilder& addColourAttachmentFormats(std::span<VkFormat> formats);
+
     PipelineBuilder& setDepthFormat(VkFormat format);
 
     PipelineBuilder& disableDepthTest();
@@ -53,6 +56,7 @@ class PipelineBuilder
     VkPipelineLayout m_PipelineLayout;
 
     std::vector<VkPipelineShaderStageCreateInfo> m_ShaderStages;
+    std::vector<VkFormat> m_ColourFormats;
 
     VkFormat m_ColourAttachmentFormat;
     VkPipelineInputAssemblyStateCreateInfo m_InputAssemblyCI;

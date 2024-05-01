@@ -138,14 +138,25 @@ PipelineBuilder& PipelineBuilder::disableBlending()
     return *this;
 }
 
-PipelineBuilder& PipelineBuilder::setColourAttachmentFormat(VkFormat format)
+PipelineBuilder& PipelineBuilder::addColourAttachmentFormat(VkFormat format)
 {
-    m_ColourAttachmentFormat = format;
+    m_ColourFormats.push_back(format);
 
-    m_RenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    m_RenderCI.pNext = nullptr;
-    m_RenderCI.colorAttachmentCount = 1;
-    m_RenderCI.pColorAttachmentFormats = &m_ColourAttachmentFormat;
+    return *this;
+}
+
+PipelineBuilder&
+PipelineBuilder::addColourAttachmentFormats(std::initializer_list<VkFormat> formats)
+{
+    for (size_t i = 0; i < formats.size(); i++)
+        m_ColourFormats.push_back(*(formats.begin() + i));
+
+    return *this;
+}
+PipelineBuilder& PipelineBuilder::addColourAttachmentFormats(std::span<VkFormat> formats)
+{
+    for (size_t i = 0; i < formats.size(); i++)
+        m_ColourFormats.push_back(*(formats.begin() + i));
 
     return *this;
 }
@@ -194,6 +205,11 @@ PipelineBuilder& PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompa
 
 VkPipeline PipelineBuilder::build()
 {
+    m_RenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    m_RenderCI.pNext = nullptr;
+    m_RenderCI.colorAttachmentCount = static_cast<uint32_t>(m_ColourFormats.size());
+    m_RenderCI.pColorAttachmentFormats = m_ColourFormats.data();
+
     VkPipelineViewportStateCreateInfo viewportStateCI{};
     viewportStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportStateCI.pNext = nullptr;
@@ -203,13 +219,16 @@ VkPipeline PipelineBuilder::build()
     viewportStateCI.scissorCount = 1;
     viewportStateCI.pScissors = nullptr;
 
+    const std::vector<VkPipelineColorBlendAttachmentState> blendStates(m_ColourFormats.size(),
+                                                                       m_ColourBlendAS);
+
     VkPipelineColorBlendStateCreateInfo colourBlendingCI{};
     colourBlendingCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colourBlendingCI.pNext = nullptr;
     colourBlendingCI.logicOpEnable = VK_FALSE;
     colourBlendingCI.logicOp = VK_LOGIC_OP_COPY;
-    colourBlendingCI.attachmentCount = 1;
-    colourBlendingCI.pAttachments = &m_ColourBlendAS;
+    colourBlendingCI.attachmentCount = static_cast<uint32_t>(blendStates.size());
+    colourBlendingCI.pAttachments = blendStates.data();
 
     VkPipelineVertexInputStateCreateInfo vertexInputStateCI{};
     vertexInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;

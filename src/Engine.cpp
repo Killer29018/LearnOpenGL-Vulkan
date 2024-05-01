@@ -73,8 +73,10 @@ void Engine::cleanup()
 
     vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(m_Device, m_MaterialDescriptorLayout, nullptr);
-    vkDestroyDescriptorSetLayout(m_Device, m_ObjectDescriptorLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_Device, m_LightDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_ObjectDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_GBufferDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_Device, m_DummySetLayout, nullptr);
 
     for (size_t i = 0; i < m_ObjectDataBuffer.size(); i++)
     {
@@ -86,14 +88,17 @@ void Engine::cleanup()
     m_FaceTexture.destroy(m_Device, m_Allocator);
     m_BoxTexture.destroy(m_Device, m_Allocator);
 
+    vkDestroyPipeline(m_Device, m_LightDrawPipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_LightDrawPipelineLayout, nullptr);
+
+    vkDestroyPipeline(m_Device, m_SceneRenderPipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_SceneRenderPipelineLayout, nullptr);
+
+    vkDestroyPipeline(m_Device, m_DeferredRenderPipeline, nullptr);
+    vkDestroyPipelineLayout(m_Device, m_DeferredRenderPipelineLayout, nullptr);
+
     vkDestroyPipeline(m_Device, m_ShadowMapPipeline, nullptr);
     vkDestroyPipelineLayout(m_Device, m_ShadowMapPipelineLayout, nullptr);
-
-    vkDestroyPipeline(m_Device, m_LightPipeline, nullptr);
-    vkDestroyPipelineLayout(m_Device, m_LightPipelineLayout, nullptr);
-
-    vkDestroyPipeline(m_Device, m_MeshPipeline, nullptr);
-    vkDestroyPipelineLayout(m_Device, m_MeshPipelineLayout, nullptr);
 
     for (size_t i = 0; i < m_Frames.size(); i++)
     {
@@ -107,6 +112,10 @@ void Engine::cleanup()
     m_DrawImage.destroy(m_Device, m_Allocator);
     m_DepthImage.destroy(m_Device, m_Allocator);
     m_ShadowMaps.destroy(m_Device, m_Allocator);
+
+    m_GBuffer.colour.destroy(m_Device, m_Allocator);
+    m_GBuffer.normal.destroy(m_Device, m_Allocator);
+    m_GBuffer.position.destroy(m_Device, m_Allocator);
 
     destroySwapchain();
 
@@ -225,15 +234,31 @@ void Engine::initSwapchain()
 {
     createSwapchain();
 
-    m_DrawImage.create(m_Device, m_Allocator,
-                       { (uint32_t)m_Window->getSize().x, (uint32_t)m_Window->getSize().y, 1 },
-                       VK_FORMAT_R16G16B16A16_SFLOAT,
+    VkExtent3D windowSize = { (uint32_t)m_Window->getSize().x, (uint32_t)m_Window->getSize().y, 1 };
+
+    m_DrawImage.create(m_Device, m_Allocator, windowSize, VK_FORMAT_R16G16B16A16_SFLOAT,
                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
-    m_DepthImage.create(m_Device, m_Allocator,
-                        { (uint32_t)m_Window->getSize().x, (uint32_t)m_Window->getSize().y, 1 },
-                        VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    m_DepthImage.create(m_Device, m_Allocator, windowSize, VK_FORMAT_D32_SFLOAT,
+                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+
+    {
+        m_GBuffer.position.create(m_Device, m_Allocator, windowSize, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                  VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        m_GBuffer.position.createSampler(m_Device, VK_FILTER_NEAREST);
+
+        m_GBuffer.normal.create(m_Device, m_Allocator, windowSize, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        m_GBuffer.normal.createSampler(m_Device, VK_FILTER_NEAREST);
+
+        m_GBuffer.colour.create(m_Device, m_Allocator, windowSize, VK_FORMAT_R8G8B8A8_SRGB,
+                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        m_GBuffer.colour.createSampler(m_Device, VK_FILTER_NEAREST);
+    }
 
     {
         uint32_t layers = m_MaxLights * 6;
@@ -326,6 +351,14 @@ void Engine::initSyncStructures()
 
 void Engine::initDescriptorSetLayouts()
 {
+    m_DummySetLayout = DescriptorLayoutBuilder::start(m_Device).build();
+
+    m_GBufferDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
+                                    .addCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                    .addCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                    .addCombinedImageSampler(2, VK_SHADER_STAGE_FRAGMENT_BIT)
+                                    .build();
+
     m_ObjectDescriptorLayout = DescriptorLayoutBuilder::start(m_Device)
                                    .addCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
                                    .addCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -357,58 +390,6 @@ void Engine::initPipelines()
     shadowPushConstant.size = sizeof(ShadowPushConstant);
 
     {
-        m_MeshPipelineLayout = PipelineLayoutBuilder::build(
-            m_Device, { pushConstant },
-            { m_LightDescriptorLayout, m_ObjectDescriptorLayout, m_MaterialDescriptorLayout });
-
-        std::optional<VkShaderModule> vertShaderModule =
-            PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
-        std::optional<VkShaderModule> fragShaderModule =
-            PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.frag.spv");
-
-        m_MeshPipeline = PipelineBuilder::start(m_Device, m_MeshPipelineLayout)
-                             .setShaders(vertShaderModule.value(), fragShaderModule.value())
-                             .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-                             .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
-                                         VK_FRONT_FACE_COUNTER_CLOCKWISE)
-                             .setMultisampleNone()
-                             .disableBlending()
-                             .setColourAttachmentFormat(m_DrawImage.imageFormat)
-                             .setDepthFormat(m_DepthImage.imageFormat)
-                             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
-                             .build();
-
-        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
-        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
-    }
-
-    {
-        m_LightPipelineLayout =
-            PipelineLayoutBuilder::build(m_Device, { pushConstant }, { m_LightDescriptorLayout });
-
-        std::optional<VkShaderModule> vertShaderModule =
-            PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.vert.spv");
-        std::optional<VkShaderModule> fragShaderModule =
-            PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.frag.spv");
-
-        m_LightPipeline = PipelineBuilder::start(m_Device, m_LightPipelineLayout)
-                              .setShaders(vertShaderModule.value(), fragShaderModule.value())
-                              .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-                              .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
-                                          VK_FRONT_FACE_COUNTER_CLOCKWISE)
-                              .setMultisampleNone()
-                              .disableBlending()
-                              .setColourAttachmentFormat(m_DrawImage.imageFormat)
-                              .setDepthFormat(m_DepthImage.imageFormat)
-                              // .disableDepthTest()
-                              .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
-                              .build();
-
-        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
-        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
-    }
-
-    {
         m_ShadowMapPipelineLayout =
             PipelineLayoutBuilder::build(m_Device, { shadowPushConstant },
                                          { m_LightDescriptorLayout, m_ObjectDescriptorLayout });
@@ -434,6 +415,87 @@ void Engine::initPipelines()
 
         vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
         vkDestroyShaderModule(m_Device, geoShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+    }
+
+    {
+        m_DeferredRenderPipelineLayout = PipelineLayoutBuilder::build(
+            m_Device, { pushConstant },
+            { m_DummySetLayout, m_ObjectDescriptorLayout, m_MaterialDescriptorLayout });
+
+        std::optional<VkShaderModule> vertShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/deferred.vert.spv");
+        std::optional<VkShaderModule> fragShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/deferred.frag.spv");
+
+        m_DeferredRenderPipeline =
+            PipelineBuilder::start(m_Device, m_DeferredRenderPipelineLayout)
+                .setShaders(vertShaderModule.value(), fragShaderModule.value())
+                .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
+                            VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                .setMultisampleNone()
+                .disableBlending()
+                .addColourAttachmentFormats({ m_GBuffer.position.imageFormat,
+                                              m_GBuffer.normal.imageFormat,
+                                              m_GBuffer.colour.imageFormat })
+                .setDepthFormat(m_DepthImage.imageFormat)
+                .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
+                .build();
+
+        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+    }
+
+    {
+        m_SceneRenderPipelineLayout = PipelineLayoutBuilder::build(
+            m_Device, { pushConstant },
+            { m_LightDescriptorLayout, m_GBufferDescriptorLayout, m_MaterialDescriptorLayout });
+
+        std::optional<VkShaderModule> vertShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.vert.spv");
+        std::optional<VkShaderModule> fragShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/mesh.frag.spv");
+
+        m_SceneRenderPipeline = PipelineBuilder::start(m_Device, m_SceneRenderPipelineLayout)
+                                    .setShaders(vertShaderModule.value(), fragShaderModule.value())
+                                    .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                                    .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
+                                                VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                                    .setMultisampleNone()
+                                    .disableBlending()
+                                    .addColourAttachmentFormat(m_DrawImage.imageFormat)
+                                    .setDepthFormat(m_DepthImage.imageFormat)
+                                    // .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
+                                    .disableDepthTest()
+                                    .build();
+
+        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
+        vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
+    }
+
+    {
+        m_LightDrawPipelineLayout =
+            PipelineLayoutBuilder::build(m_Device, { pushConstant }, { m_LightDescriptorLayout });
+
+        std::optional<VkShaderModule> vertShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.vert.spv");
+        std::optional<VkShaderModule> fragShaderModule =
+            PipelineBuilder::createShaderModule(m_Device, "res/shaders/light.frag.spv");
+
+        m_LightDrawPipeline = PipelineBuilder::start(m_Device, m_LightDrawPipelineLayout)
+                                  .setShaders(vertShaderModule.value(), fragShaderModule.value())
+                                  .inputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                                  .rasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT,
+                                              VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                                  .setMultisampleNone()
+                                  .disableBlending()
+                                  .addColourAttachmentFormat(m_DrawImage.imageFormat)
+                                  .setDepthFormat(m_DepthImage.imageFormat)
+                                  .enableDepthTest(VK_TRUE, VK_COMPARE_OP_GREATER_OR_EQUAL)
+                                  .build();
+
+        vkDestroyShaderModule(m_Device, vertShaderModule.value(), nullptr);
         vkDestroyShaderModule(m_Device, fragShaderModule.value(), nullptr);
     }
 }
@@ -560,9 +622,17 @@ void Engine::uploadLightData()
          .specular = glm::vec3(0.3f),
          .attenuation = glm::vec3(0.5f, 0.08f, 0.0f) },
         { .position{ 0.5f, 3.0f, 5.0f },
-         .diffuse{ 0.0f, 0.8f, 0.8f },
+         .diffuse{ 0.0f, 0.9f, 0.9f },
          .specular{ 0.5f },
-         .attenuation{ 0.0f, 1.0f, 0.0f } }
+         .attenuation{ 1.0f, 0.0f, 0.0f } },
+        { .position{ 3.5f, 3.0f, 5.0f },
+         .diffuse{ 0.9f, 0.4f, 0.3f },
+         .specular{ 0.5f },
+         .attenuation{ 1.0f, 0.0f, 0.0f } },
+        { .position{ 3.5f, 3.0f, -5.0f },
+         .diffuse{ 0.9f, 0.9f, 0.0f },
+         .specular{ 0.8f },
+         .attenuation{ 0.8f, 0.2f, 0.0f } },
     };
     m_LightCount = lights.size();
 
@@ -633,11 +703,11 @@ void Engine::initDescriptorPool()
 {
     std::vector<VkDescriptorPoolSize> poolSizes = {
         {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-         .descriptorCount = MAX_FRAMES_IN_FLIGHT * 3                                                   },
+         .descriptorCount = MAX_FRAMES_IN_FLIGHT * 6                                                   },
         { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        .descriptorCount = MAX_FRAMES_IN_FLIGHT * 3},
     };
 
-    const uint32_t maxSets = MAX_FRAMES_IN_FLIGHT * 3;
+    const uint32_t maxSets = MAX_FRAMES_IN_FLIGHT * 5;
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{};
     descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -650,6 +720,24 @@ void Engine::initDescriptorPool()
 
 void Engine::initDescriptorSets()
 {
+    std::vector<VkDescriptorSet> temp;
+    temp = DescriptorSetBuilder::start(m_Device, m_DescriptorPool, 1, m_DummySetLayout).build();
+    m_DummySet = temp[0];
+
+    m_GBufferDescriptor =
+        DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
+                                    m_GBufferDescriptorLayout)
+            .addCombinedImageSampler(0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_GBuffer.position.imageView,
+                                     m_GBuffer.position.imageSampler.value())
+            .addCombinedImageSampler(1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_GBuffer.normal.imageView,
+                                     m_GBuffer.normal.imageSampler.value())
+            .addCombinedImageSampler(2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     m_GBuffer.colour.imageView,
+                                     m_GBuffer.colour.imageSampler.value())
+            .build();
+
     m_ObjectDescriptors =
         DescriptorSetBuilder::start(m_Device, m_DescriptorPool, MAX_FRAMES_IN_FLIGHT,
                                     m_ObjectDescriptorLayout)
@@ -839,6 +927,111 @@ void Engine::renderShadow(VkCommandBuffer& cmd)
     vkCmdEndRendering(cmd);
 }
 
+void Engine::renderDeferred(VkCommandBuffer& cmd)
+{
+    VkRenderingAttachmentInfo positionAI{};
+    positionAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    positionAI.pNext = nullptr;
+    positionAI.imageView = m_GBuffer.position.imageView;
+    positionAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    positionAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    positionAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    positionAI.clearValue.color = {
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+
+    VkRenderingAttachmentInfo normalAI{};
+    normalAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    normalAI.pNext = nullptr;
+    normalAI.imageView = m_GBuffer.normal.imageView;
+    normalAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    normalAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    normalAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    normalAI.clearValue.color = {
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+
+    VkRenderingAttachmentInfo colourAI{};
+    colourAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    colourAI.pNext = nullptr;
+    colourAI.imageView = m_GBuffer.colour.imageView;
+    colourAI.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    colourAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colourAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colourAI.clearValue.color = {
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+
+    VkRenderingAttachmentInfo depthAI{};
+    depthAI.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAI.pNext = nullptr;
+    depthAI.imageView = m_DepthImage.imageView;
+    depthAI.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAI.clearValue.depthStencil.depth = -1.0f;
+
+    const std::vector<VkRenderingAttachmentInfo> colourAttachments = { positionAI, normalAI,
+                                                                       colourAI };
+
+    VkRenderingInfo renderInfo{};
+    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderInfo.pNext = nullptr;
+    renderInfo.flags = 0;
+    renderInfo.renderArea =
+        VkRect2D({ 0, 0 }, { m_DrawImage.imageExtent.width, m_DrawImage.imageExtent.height });
+    renderInfo.layerCount = 1;
+    renderInfo.colorAttachmentCount = static_cast<uint32_t>(colourAttachments.size());
+    renderInfo.pColorAttachments = colourAttachments.data();
+    renderInfo.pDepthAttachment = &depthAI;
+    renderInfo.pStencilAttachment = nullptr;
+
+    vkCmdBeginRendering(cmd, &renderInfo);
+
+    VkViewport viewport{};
+    viewport.x = 0;
+    viewport.y = 0;
+    viewport.width = m_DrawImage.imageExtent.width;
+    viewport.height = m_DrawImage.imageExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset.x = 0.0f;
+    scissor.offset.y = 0.0f;
+    scissor.extent.width = m_DrawImage.imageExtent.width;
+    scissor.extent.height = m_DrawImage.imageExtent.height;
+
+    VertexPushConstant pushConstantData;
+
+    pushConstantData.view = m_Camera.getView();
+    pushConstantData.proj = m_Camera.getPerspective(m_Window->getSize());
+
+    pushConstantData.cameraPos = m_Camera.getPosition();
+    pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_DeferredRenderPipeline);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_DeferredRenderPipelineLayout, 0,
+                            1, &m_DummySet, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_DeferredRenderPipelineLayout, 1,
+                            1, &m_ObjectDescriptors[m_CurrentFrame % 2], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_DeferredRenderPipelineLayout, 2,
+                            1, &m_MaterialDescriptors[m_CurrentFrame % 2], 0, nullptr);
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    vkCmdPushConstants(cmd, m_DeferredRenderPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(VertexPushConstant), &pushConstantData);
+
+    vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_ObjectCount, 0, 0, 0);
+
+    vkCmdEndRendering(cmd);
+}
+
 void Engine::renderGeometry(VkCommandBuffer& cmd)
 {
     VkRenderingAttachmentInfo colourAI{};
@@ -857,7 +1050,7 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     depthAI.pNext = nullptr;
     depthAI.imageView = m_DepthImage.imageView;
     depthAI.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAI.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     depthAI.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAI.clearValue.depthStencil.depth = -1.0f;
 
@@ -901,38 +1094,36 @@ void Engine::renderGeometry(VkCommandBuffer& cmd)
     pushConstantData.vertexBuffer = m_BasicMesh.vertexBufferAddress;
 
     {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipeline);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_SceneRenderPipeline);
 
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 0, 1,
-                                &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 1, 1,
-                                &m_ObjectDescriptors[m_CurrentFrame % 2], 0, nullptr);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipelineLayout, 2, 1,
-                                &m_MaterialDescriptors[m_CurrentFrame % 2], 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_SceneRenderPipelineLayout,
+                                0, 1, &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_SceneRenderPipelineLayout,
+                                1, 1, &m_GBufferDescriptor[m_CurrentFrame % 2], 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_SceneRenderPipelineLayout,
+                                2, 1, &m_MaterialDescriptors[m_CurrentFrame % 2], 0, nullptr);
 
         vkCmdSetViewport(cmd, 0, 1, &viewport);
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        vkCmdPushConstants(cmd, m_MeshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+        vkCmdPushConstants(cmd, m_SceneRenderPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(VertexPushConstant), &pushConstantData);
 
-        vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_ObjectCount, 0, 0, 0);
+        vkCmdDraw(cmd, 6, 1, 0, 0);
     }
 
     {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipeline);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightDrawPipeline);
 
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightPipelineLayout, 0, 1,
-                                &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_LightDrawPipelineLayout, 0,
+                                1, &m_LightDescriptors[m_CurrentFrame % 2], 0, nullptr);
 
         vkCmdSetViewport(cmd, 0, 1, &viewport);
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         vkCmdBindIndexBuffer(cmd, m_BasicMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        vkCmdPushConstants(cmd, m_LightPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+        vkCmdPushConstants(cmd, m_LightDrawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(VertexPushConstant), &pushConstantData);
 
         vkCmdDrawIndexed(cmd, m_BasicMesh.indexCount, m_LightCount, 0, 0, 0);
@@ -1004,6 +1195,22 @@ void Engine::render()
 
     AllocatedImage::transition(cmd, m_ShadowMaps.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                                VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    AllocatedImage::transition(cmd, m_GBuffer.position.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_GENERAL);
+    AllocatedImage::transition(cmd, m_GBuffer.normal.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_GENERAL);
+    AllocatedImage::transition(cmd, m_GBuffer.colour.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_GENERAL);
+
+    renderDeferred(cmd);
+
+    AllocatedImage::transition(cmd, m_GBuffer.position.image, VK_IMAGE_LAYOUT_GENERAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    AllocatedImage::transition(cmd, m_GBuffer.normal.image, VK_IMAGE_LAYOUT_GENERAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    AllocatedImage::transition(cmd, m_GBuffer.colour.image, VK_IMAGE_LAYOUT_GENERAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     renderGeometry(cmd);
 
