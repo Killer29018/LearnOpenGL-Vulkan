@@ -26,11 +26,8 @@ vec4 invGamma(vec4 colour)
     return vec4(pow(colour.rgb, vec3(2.2)), colour.a);
 }
 
-vec4 v;
-
 bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
 {
-    // ivec3 size = imageSize(u_ShadowMaps);
     for (int i = 0; i < 6; i++)
     {
         vec4 position = light.proj * light.view[i] * vec4(v_FragPos.xyzw);
@@ -47,12 +44,10 @@ bool inShadow(LightData light, int layer, vec3 normal, vec3 lightDir)
             continue;
 
         float closest = texture(u_ShadowMaps, vec3(projected.xy, layer * 6 + i)).r;
-        // float closest = imageLoad(u_ShadowMaps, ivec3(projected.xy * size.xy, layer * 6 + i)).r;
 
         float bias = max(0.005 * 1.0 - dot(normal, lightDir), 0.0005);
 
         bool inShadow = ((current + bias) < closest) ? true : false;
-
 
         return inShadow;
     }

@@ -107,7 +107,6 @@ void Engine::cleanup()
     m_DrawImage.destroy(m_Device, m_Allocator);
     m_DepthImage.destroy(m_Device, m_Allocator);
     m_ShadowMaps.destroy(m_Device, m_Allocator);
-    // m_ShadowDepth.destroy(m_Device, m_Allocator);
 
     destroySwapchain();
 
